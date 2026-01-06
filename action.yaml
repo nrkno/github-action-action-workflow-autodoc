@@ -5,7 +5,7 @@ description: |
 
   autodoc:
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
 inputs:
   workflow_file:
@@ -34,9 +34,9 @@ inputs:
     description: "Author email to use for git commits"
     required: false
   debug:
-    description: "Print debug messages"
+    description: "Print debug messages. 0=none, 1=some, 2=more, 3=all"
     required: false
-    default: "false"
+    default: "0"
   skip_commit:
     description: "Skip git add/commit/push and only update the doc file"
     required: false
@@ -44,4 +44,4 @@ inputs:
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/nrkno/github-action-action-workflow-autodoc:v1.3.1"
+  image: "docker://ghcr.io/nrkno/github-action-action-workflow-autodoc:v1.3.2"
