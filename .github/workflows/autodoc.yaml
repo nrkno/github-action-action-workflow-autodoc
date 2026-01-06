@@ -15,3 +15,5 @@ jobs:
         with:
           workflow_file: action.yaml
           doc_file: README.md
+          debug: "true"
+          skip_commit: "true"
