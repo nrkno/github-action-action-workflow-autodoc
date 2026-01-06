@@ -36,6 +36,7 @@ inputs:
   debug:
     description: "Print debug messages"
     required: false
+    default: "false"
   skip-commit:
     description: "Skip git add/commit/push and only update the doc file"
     required: false
