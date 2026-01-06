@@ -8,10 +8,6 @@ description: |
       contents: read
       pull-requests: write
 inputs:
-  runs-on:
-    description: "The runner(s) to use for this workflow"
-    required: true
-    default: "['nrk-azure-intern', 'linux']"
   workflow-file:
     description: "Path to the workflow file to document"
     required: true
