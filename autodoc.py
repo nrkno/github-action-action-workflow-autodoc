@@ -500,6 +500,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    for test in args.__dict__:
+        debug_log(args.debug, f"Argument {test} = \"{args.__dict__[test]}\"")
+
     if not args.workflow_file:
         parser.error("--workflow-file (or INPUT_WORKFLOW_FILE) is required")
     if not args.doc_file:

@@ -8,40 +8,40 @@ description: |
       contents: read
       pull-requests: write
 inputs:
-  workflow-file:
+  workflow_file:
     description: "Path to the workflow file to document"
     required: true
     default: ".github/workflows/plan.yaml"
-  doc-file:
+  doc_file:
     description: "Path to the markdown file to update with documentation"
     required: true
     default: "README.md"
-  start-token:
+  start_token:
     description: "Token marking the start of the autodoc section"
     required: false
     default: "<!-- autodoc start -->"
-  end-token:
+  end_token:
     description: "Token marking the end of the autodoc section"
     required: false
     default: "<!-- autodoc end -->"
-  commit-message:
+  commit_message:
     description: "Commit message to use when committing changes"
     required: false
   author:
     description: "Author name to use for git commits"
     required: false
-  author-email:
+  author_email:
     description: "Author email to use for git commits"
     required: false
   debug:
     description: "Print debug messages"
     required: false
     default: "false"
-  skip-commit:
+  skip_commit:
     description: "Skip git add/commit/push and only update the doc file"
     required: false
     default: "false"
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/nrkno/github-action-action-workflow-autodoc:v1.2.2"
+  image: "docker://ghcr.io/nrkno/github-action-action-workflow-autodoc:v1.3.0"
