@@ -1,0 +1,35 @@
+name: Version Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+env:
+  MANIFEST_PATH: action.yaml
+
+permissions:
+  checks: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-version:
+    name: Version Check
+    runs-on: ubuntu-latest
+
+    if: ${{ github.actor != 'dependabot[bot]' }}
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-tags: true
+
+      - name: Check Version
+        id: check-version
+        uses: issue-ops/semver@5b8bb084b6834d03ddb5c7c96c683a588a2072ca # v2
+        with:
+          check-only: true
+          manifest-path: ${{ env.MANIFEST_PATH }}
