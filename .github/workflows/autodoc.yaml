@@ -1,0 +1,13 @@
+on:
+  pull_request:
+
+jobs:
+  autodoc:
+    uses: nrkno/github-action-action-workflow-autodoc@v1
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      runs-on: '["nrk-azure-intern", "linux"]'
+      workflow-file: ./action.yaml
+      doc-file: README.md

@@ -1,0 +1,50 @@
+# action.yml
+name: "autodoc"
+description: |
+  Update readme with workflow and action docs.
+
+  autodoc:
+    permissions:
+      contents: read
+      pull-requests: write
+inputs:
+  runs-on:
+    description: "The runner(s) to use for this workflow"
+    required: true
+    default: "['nrk-azure-intern', 'linux']"
+  workflow-file:
+    description: "Path to the workflow file to document"
+    required: true
+    default: ".github/workflows/plan.yaml"
+  doc-file:
+    description: "Path to the markdown file to update with documentation"
+    required: true
+    default: "README.md"
+  start-token:
+    description: "Token marking the start of the autodoc section"
+    required: false
+    default: "<!-- autodoc start -->"
+  end-token:
+    description: "Token marking the end of the autodoc section"
+    required: false
+    default: "<!-- autodoc end -->"
+  commit-message:
+    description: "Commit message to use when committing changes"
+    required: false
+  author:
+    description: "Author name to use for git commits"
+    required: false
+  author-email:
+    description: "Author email to use for git commits"
+    required: false
+  debug:
+    description: "Print debug messages"
+    required: false
+  skip-commit:
+    description: "Skip git add/commit/push and only update the doc file"
+    required: false
+    default: "false"
+
+runs:
+  using: "docker"
+  image: "docker://ghcr.io/nrkno/github-action-autodoc:v1.0.0"
