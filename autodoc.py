@@ -14,424 +14,293 @@ import re
 import subprocess
 import sys
 import textwrap
-
 import yaml
 
 
-def debug_log(enabled, message):
+def debug_log(enabled, message, level=0):
     """Usage: call with the `--debug` flag to emit verbose trace statements."""
-    if enabled:
-        print(f"[autodoc] {message}")
+    if enabled >= level:
+        if level == 1:
+            print(f"[DEBUG] {message}")
+        elif level == 2:
+            print(f"[VERBOSE] {message}")
+        elif level == 3:
+            print(f"[GARBAGE] {message}")
+        else:
+          print(f"[INFO] {message}")
 
+def determin_environment():
+    """Determin if this is running in GitHub Actions or locally."""
+    if "GITHUB_ACTIONS" in os.environ and os.environ["GITHUB_ACTIONS"] == "true":
+        return "github"
+    return "local"
 
-def detect_repo_info(workflow_path, debug=False):
-    """Usage: call with a workflow path to resolve git metadata and refs for docs."""
+def determin_workflow_or_action(workflow_content, debug):
+    """Determine if the file is a GitHub Action or a reusable workflow."""
+    if "on" in workflow_content:
+        debug_log(debug, "Determined file type: workflow", 1)
+        if "workflow_call" in workflow_content["on"]:
+          return "workflow"
+    elif "runs" in workflow_content:
+        debug_log(debug, "Determined file type: action", 1)
+        return "action"
+    else:
+        debug_log(debug, "Determined file type: unknown", 1)
+        return "unknown"
 
-    def run_git(args_list, cwd):
-        try:
-            return subprocess.check_output(
-                ["git", *args_list],
-                cwd=cwd,
-                stderr=subprocess.DEVNULL,
-                text=True,
-            ).strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return None
+def parse_workflow_file(workflow_file, debug):
+    """Parse the workflow/action YAML file and return its content as a dict."""
+    debug_log(debug, f"Parsing workflow file: {workflow_file}", 1)
+    with open(workflow_file, "r", encoding="utf-8") as f:
+        content = yaml.load(f, Loader=yaml.BaseLoader)
+    debug_log(debug, f"Parsed content: {content}", 3)
+    return content
 
-    workflow_dir = os.path.dirname(workflow_path)
-    repo_root = run_git(["rev-parse", "--show-toplevel"], workflow_dir)
+def load_docs_file(doc_file, debug):
+    """Load the documentation file to be updated."""
+    debug_log(debug, f"Loading documentation file: {doc_file}", 1)
+    with open(doc_file, "r", encoding="utf-8") as f:
+        content = f.read()
+    debug_log(debug, f"Loaded documentation content: {content}", 3)
+    return content
 
-    owner = repo = ref = None
-    if repo_root:
-        remote = run_git(["config", "--get", "remote.origin.url"], repo_root)
-        if remote:
-            if remote.endswith(".git"):
-                remote = remote[:-4]
-            if remote.startswith("git@github.com:"):
-                owner_repo = remote.split(":", 1)[1]
-            elif remote.startswith("https://github.com/"):
-                owner_repo = remote.split("github.com/", 1)[1]
+def locate_docstring_section(docs_content, start_token, end_token, debug):
+    """Locate the section in the docs file to be replaced."""
+    debug_log(debug, f"Locating docstring section between '{start_token}' and '{end_token}'", 1)
+    start_index = docs_content.find(start_token)
+    end_index = docs_content.find(end_token, start_index)
+    if start_index == -1 or end_index == -1:
+        debug_log(debug, "Docstring section not found", 0)
+        return None, None
+    debug_log(debug, f"Located docstring section: start_index={start_index}, end_index={end_index}", 2)
+    return start_index + len(start_token), end_index
+
+def action_get_inputs(workflow_content, debug):
+    """Extract inputs from a GitHub Action file."""
+    debug_log(debug, "Extracting inputs from action", 1)
+    all_inputs = {
+        "inputs": {},
+        "inputs_required": {}
+    }
+    if "inputs" in workflow_content:
+        for input_name, input_props in workflow_content["inputs"].items():
+            debug_log(debug, f"Processing input: {input_name} {input_props['required']}", 2)
+            if "required" in input_props:
+                input_props["required"] = str(input_props["required"]).lower()
+                if input_props["required"] == "true":
+                    all_inputs["inputs_required"][input_name] = input_props
+                    continue
+            all_inputs["inputs"][input_name] = input_props
+    
+    debug_log(debug, f"Found inputs: {len(all_inputs['inputs']) + len(all_inputs['inputs_required'])}", 0)
+    debug_log(debug, f"Found input: {all_inputs}", 3)
+    return all_inputs
+
+def action_get_outputs(workflow_content, debug):
+    """Extract outputs from a GitHub Action file."""
+    all_outputs = {}
+    if "outputs" in workflow_content:
+        for output_name, output_props in workflow_content["outputs"].items():
+            debug_log(debug, f"Processing output: {output_name}", 2)
+            all_outputs[output_name] = output_props
+    debug_log(debug, f"Found outputs: {len(all_outputs)}", 0)
+    debug_log(debug, f"Found outputs: {all_outputs}", 2)
+    return all_outputs
+
+def action_get_secrets(workflow_content, debug):
+    """Extract secrets from a GitHub Action file."""
+    all_secrets = {}
+    if "secrets" in workflow_content:
+        for secret_name, secret_props in workflow_content["secrets"].items():
+            debug_log(debug, f"Processing secret: {secret_name}", 2)
+            all_secrets[secret_name] = secret_props
+    debug_log(debug, f"Found secrets: {len(all_secrets)}", 0)
+    debug_log(debug, f"Found secrets: {all_secrets}", 2)
+    return all_secrets
+
+def workflow_get_inputs(workflow_content, debug):
+    """Extract inputs from a reusable workflow file."""
+    all_inputs = {
+        "inputs": {},
+        "inputs_required": {}
+    }
+
+    if "inputs" in workflow_content["on"]["workflow_call"]:
+        for input_name, input_props in workflow_content["on"]["workflow_call"]["inputs"].items():
+            debug_log(debug, f"Processing input: {input_name}", 2)
+            if "required" in input_props:
+                input_props["required"] = str(input_props["required"]).lower()
+                if input_props["required"] == "true":
+                    all_inputs["inputs_required"][input_name] = input_props
             else:
-                owner_repo = None
-            if owner_repo and "/" in owner_repo:
-                owner, repo = owner_repo.split("/", 1)
-
-        ref = run_git(["describe", "--tags", "--abbrev=0"], repo_root)
-        if not ref:
-            ref = run_git(["rev-parse", "--short", "HEAD"], repo_root)
-    else:
-        ref = None
-
-    rel_path = os.path.relpath(workflow_path, repo_root) if repo_root else os.path.relpath(workflow_path)
-    rel_path = rel_path.replace(os.sep, "/")
-
-    if owner and repo and ref:
-        workflow_ref = f"{owner}/{repo}/{rel_path}@{ref}"
-        action_ref = f"{owner}/{repo}@{ref}"
-    else:
-        workflow_ref = f"<owner>/<repo>/{rel_path}@<ref>"
-        action_ref = f"<owner>/<repo>@<ref>"
-
-    branch = run_git(["rev-parse", "--abbrev-ref", "HEAD"], repo_root) if repo_root else None
-    debug_log(debug, f"Resolved workflow ref '{workflow_ref}' and branch '{branch or 'HEAD'}'.")
-
-    return {
-        "repo_root": repo_root,
-        "workflow_ref": workflow_ref,
-        "action_ref": action_ref,
-        "branch": branch or "HEAD",
-    }
-
-
-def document_workflow_arg(
-    *,
-    name,
-    type=None,
-    default=None,
-    required=None,
-    description=None,
-    value=None,
-):
-    """
-    Usage: call to convert a workflow/action input definition into a Markdown bullet.
-    >>> print(document_workflow_arg(name="foo"))
-    - `foo`
-    >>> print(document_workflow_arg(name="foo", default=True))
-    - `foo` (default `true`)
-    >>> print(document_workflow_arg(name="foo", required=True))
-    - `foo` (**required**)
-    >>> print(document_workflow_arg(name="foo", description="hello"))
-    - `foo` - hello
-    >>> print(document_workflow_arg(name="foo", type="string", default="bar", required=True, description="hello"))
-    - `foo` (string, default `"bar"`, **required**) - hello
-    >>> print(document_workflow_arg(name="foo", description="hello", value="something"))
-    - `foo` - hello
-    """
-    props = []
-    if type:
-        props.append(type)
-    if default is not None:
-        props.append(f"default `{json.dumps(default)}`")
-    if required:
-        props.append("**required**")
-
-    s = f"- `{name}`"
-    if props:
-        s += " ("
-        s += ", ".join(props)
-        s += ")"
-
-    if description:
-        description, _ = extract_autodoc_metadata(description)
-        s += " - "
-        s += description
-
-    return s
-
-def _get_on_section(workflow_def):
-    """Usage: call with a workflow dict to safely access its `on` section."""
-    if "on" in workflow_def:
-        return workflow_def["on"]
-    # PyYAML 1.1 treats the word "on" as boolean True unless YAML 1.2 mode is used.
-    if True in workflow_def:
-        return workflow_def[True]
-    return {}
-
-def workflow_or_action(workflow_def):
-    """
-    Usage: call with parsed YAML to determine if it defines a workflow or action.
-    >>> workflow_or_action({})
-    'action'
-    >>> workflow_or_action({'on': {'workflow_call': {}}})
-    'workflow'
-    """
-    on_section = _get_on_section(workflow_def)
-    if isinstance(on_section, dict) and "workflow_call" in on_section:
-        return "workflow"
-    return "action"
-
-def input_placeholder(name, info):
-    """Usage: call with an input name and its metadata dict to build an example value."""
-    default = info.get("default")
-    if default is not None:
-        return json.dumps(default)
-    return f"<{name}>"
-
-def secret_placeholder(name):
-    """Usage: call with a secret key name to produce a `${{ secrets.X }}` placeholder."""
-    return f"${{{{ secrets.{name.upper()} }}}}"
-
-def render_workflow_example(workflow_ref, permissions, inputs, secrets, use_optional=False):
-    """Usage: call with workflow reference/metadata to render YAML usage snippets."""
-    selected_inputs = inputs if use_optional else {
-        k: v for k, v in inputs.items() if v.get("required")
-    }
-    selected_secrets = secrets if use_optional else {
-        k: v for k, v in secrets.items() if v.get("required")
-    }
-
-    lines = [
-        "jobs:",
-        "  call-workflow:",
-        f"    uses: {workflow_ref}",
-    ]
-
-    perm_block = render_permissions_block(permissions, indent="    ")
-    if perm_block:
-        lines.extend(perm_block)
-
-    if selected_inputs:
-        lines.append("    with:")
-        for key, val in selected_inputs.items():
-            lines.append(f"      {key}: {input_placeholder(key, val)}")
-
-    if selected_secrets:
-        lines.append("    secrets:")
-        for key in selected_secrets:
-            lines.append(f"      {key}: {secret_placeholder(key)}")
-
-    return "\n".join(lines)
-
-def render_action_example(action_ref, permissions, inputs, use_optional=False):
-    """Usage: call with action reference/inputs to render sample workflow steps."""
-    selected_inputs = inputs if use_optional else {
-        k: v for k, v in inputs.items() if v.get("required")
-    }
-
-    lines = [
-        "jobs:",
-        "  call-action:",
-        "    runs-on: <runs-on>",
-    ]
-
-    perm_block = render_permissions_block(permissions, indent="    ")
-    if perm_block:
-        lines.extend(perm_block)
-
-    lines.extend([
-        "    steps:",
-        "      - name: Use action",
-        f"        uses: {action_ref}",
-    ])
-
-    if selected_inputs:
-        lines.append("        with:")
-        for key, val in selected_inputs.items():
-            lines.append(f"          {key}: {input_placeholder(key, val)}")
-
-    return "\n".join(lines)
-
-def doc_examples(kind, ref, permissions, inputs, secrets):
-    """Usage: call with workflow/action metadata to assemble example Markdown blocks."""
-    sections = []
-
-    if kind == "workflow":
-        full = render_workflow_example(ref, permissions, inputs, secrets, use_optional=True)
-        minimal = render_workflow_example(ref, permissions, inputs, secrets, use_optional=False)
-    else:
-        full = render_action_example(ref, permissions, inputs, use_optional=True)
-        minimal = render_action_example(ref, permissions, inputs, use_optional=False)
-
-    sections.append("### Example usage")
-    sections.append("#### Full example")
-    sections.append(f"```yaml\n{full}\n```")
-    sections.append("#### Minimal example")
-    sections.append(f"```yaml\n{minimal}\n```")
-
-    return "\n\n".join(sections)
-
-def create_documentation(workflow_def, workflow_ref, action_ref=None):
-    """Usage: call with a parsed workflow/action to get the full Markdown doc."""
-    kind = workflow_or_action(workflow_def)
-    doc_parts = []
-    description = workflow_def.get("description")
-    _, metadata = extract_autodoc_metadata(description)
-    metadata_permissions = metadata.get("permissions") if metadata else None
-
-    if kind == "workflow":
-        spec = _get_on_section(workflow_def).get("workflow_call", {})
-        inputs = spec.get("inputs", {})
-        secrets = spec.get("secrets", {})
-        outputs = spec.get("outputs", {})
-        permissions = (
-            spec.get("permissions")
-            or metadata_permissions
-            or workflow_def.get("permissions")
-            or collect_job_permissions(workflow_def.get("jobs"))
-        )
-
-        doc_parts.append("### Inputs")
-        if inputs:
-            doc_parts.append("\n".join(
-                [document_workflow_arg(name=k, **v) for k, v in inputs.items()]
-            ))
-        else:
-            doc_parts.append("There are no inputs for this workflow.")
-
-        if secrets:
-            doc_parts.append("\n### Secrets")
-            doc_parts.append("\n".join(
-                [document_workflow_arg(name=k, **v) for k, v in secrets.items()]
-            ))
-
-        if outputs:
-            doc_parts.append("\n### Outputs")
-            doc_parts.append("\n".join(
-                [document_workflow_arg(name=k, **v) for k, v in outputs.items()]
-            ))
-
-        permissions_doc = format_permissions(permissions)
-        if permissions_doc:
-            doc_parts.append("\n### Required permissions")
-            doc_parts.append(permissions_doc)
-
-        doc_parts.append("\n" + doc_examples(kind, workflow_ref, permissions, inputs, secrets))
-    else:
-        inputs = workflow_def.get("inputs", {})
-        outputs = workflow_def.get("outputs", {})
-        permissions = metadata_permissions or workflow_def.get("permissions")
-
-        doc_parts.append("### Inputs")
-        if inputs:
-            doc_parts.append("\n".join(
-                [document_workflow_arg(name=k, **v) for k, v in inputs.items()]
-            ))
-        else:
-            doc_parts.append("There are no inputs for this action.")
-
-        if outputs:
-            doc_parts.append("\n### Outputs")
-            doc_parts.append("\n".join(
-                [document_workflow_arg(name=k, **v) for k, v in outputs.items()]
-            ))
-
-        permissions_doc = format_permissions(permissions)
-        if permissions_doc:
-            doc_parts.append("\n### Required permissions")
-            doc_parts.append(permissions_doc)
-
-        ref = action_ref or workflow_ref
-        doc_parts.append("\n" + doc_examples(kind, ref, permissions, inputs, {}))
-
-    return "\n\n".join(doc_parts)
-
-def replace_docstring(src, docstring, start_token="<!-- autodoc start -->", end_token="<!-- autodoc end -->"):
-    """
-    Usage: call with the target file contents to replace the marked autodoc block.
-    >>> src = '''one
-    ... two
-    ... <!-- autodoc start -->
-    ... three
-    ... <!-- autodoc end -->
-    ... four
-    ... five'''
-    >>> res = replace_docstring(src, "this\\nwas\\nreplaced")
-    >>> print(res)
-    one
-    two
-    <!-- autodoc start -->
-    this
-    was
-    replaced
-    <!-- autodoc end -->
-    four
-    five
-    """
-    start = re.escape(start_token)
-    end = re.escape(end_token)
-    pattern = re.compile(rf"({start}).*?({end})", flags=re.IGNORECASE | re.DOTALL)
-    return pattern.sub(r"\1\n" + docstring + r"\n\2", src, count=1)
-
-
-def extract_autodoc_metadata(description):
-    """Usage: call with a description string to split out trailing `autodoc` metadata.
-    >>> extract_autodoc_metadata("desc\n\n  autodoc:\n    permissions:\n      contents: write")
-    ('desc', {'permissions': {'contents': 'write'}})
-    >>> extract_autodoc_metadata("just text")
-    ('just text', {})
-    """
-    if not description or not isinstance(description, str):
-        return description, {}
-
-    match = re.search(r"(^|\n)(?P<indent>[ \t]*)autodoc:\s*\n(?P<body>[\s\S]+)$", description)
-    if not match:
-        return description, {}
-
-    start = match.start("indent")
-    metadata_block = description[start:]
-    cleaned = description[:start].rstrip()
-
-    try:
-        parsed = yaml.safe_load(textwrap.dedent(metadata_block)) or {}
-    except yaml.YAMLError:
-        parsed = {}
-
-    if isinstance(parsed, dict) and "autodoc" in parsed:
-        parsed = parsed["autodoc"]
-
-    if not isinstance(parsed, dict):
-        parsed = {}
-
-    return cleaned, parsed
-
-
-def format_permissions(permissions):
-    """Usage: call with permissions payload to get Markdown bullet output."""
-    if not permissions:
-        return ""
-
-    if isinstance(permissions, str):
-        return f"- `{permissions}`"
-
-    if isinstance(permissions, (list, tuple, set)):
-        return "\n".join(f"- `{item}`" for item in permissions)
-
-    if isinstance(permissions, dict):
-        return "\n".join(
-            f"- `{scope}`: `{level}`" for scope, level in permissions.items()
-        )
-
-    return ""
-
-
-def render_permissions_block(permissions, indent=""):
-    """Usage: call with permissions payload to embed YAML snippets in examples."""
-    if not permissions:
-        return []
-
-    if isinstance(permissions, dict):
-        lines = [f"{indent}permissions:"]
-        for scope, level in permissions.items():
-            lines.append(f"{indent}  {scope}: {level}")
-        return lines
-
-    if isinstance(permissions, str):
-        return [f"{indent}permissions: {permissions}"]
-
-    if isinstance(permissions, (list, tuple, set)):
-        lines = [f"{indent}permissions:"]
-        for scope in permissions:
-            lines.append(f"{indent}  {scope}: write")
-        return lines
-
-    return []
-
-
-def collect_job_permissions(jobs_section):
-    """Usage: call with the `jobs` mapping to merge job-specific permissions."""
-    if not isinstance(jobs_section, dict):
-        return None
-
-    aggregated = {}
-    found = False
-    for job in jobs_section.values():
-        if not isinstance(job, dict):
-            continue
-        job_permissions = job.get("permissions")
-        if isinstance(job_permissions, dict):
-            aggregated.update(job_permissions)
-            found = True
-    return aggregated if found else None
+                all_inputs["inputs"][input_name] = input_props
+    debug_log(debug, f"Found inputs: {all_inputs}", 3)
+    return all_inputs
+
+def workflow_get_outputs(workflow_content, debug):
+    """Extract outputs from a reusable workflow file."""
+    all_outputs = {}
+    
+    if "outputs" in workflow_content["on"]["workflow_call"]:
+        for output_name, output_props in workflow_content["on"]["workflow_call"]["outputs"].items():
+            debug_log(debug, f"Processing output: {output_name}", 2)
+            all_outputs[output_name] = output_props
+    debug_log(debug, f"Found outputs: {all_outputs}", 2)
+    return all_outputs
+
+def workflow_get_secrets(workflow_content, debug):
+    """Extract secrets from a reusable workflow file."""
+    all_secrets = {}
+
+    if "secrets" in workflow_content["on"]["workflow_call"]:
+        for secret_name, secret_props in workflow_content["on"]["workflow_call"]["secrets"].items():
+            debug_log(debug, f"Processing secret: {secret_name}", 2)
+            all_secrets[secret_name] = secret_props
+    debug_log(debug, f"Found secrets: {all_secrets}", 2)
+    return all_secrets
+
+def create_inputs_docstring(inputs, debug):
+    """Create a Markdown docstring for inputs."""
+    docstring = ""
+    if len(inputs["inputs_required"]) > 0:
+        docstring += "### Required Inputs\n\n"
+        for input_name, input_props in inputs["inputs_required"].items():
+            docstring += f"- **{input_name}**: {input_props.get('description', 'No description provided.')} (type: {input_props.get('type', 'unknown')})\n"
+    if len(inputs["inputs"]) > 0:
+        docstring += "\n### Optional Inputs\n\n"
+        for input_name, input_props in inputs["inputs"].items():
+            docstring += f"- **{input_name}**: {input_props.get('description', 'No description provided.')} (Default: \"{input_props.get('default', 'None')}\", type: {input_props.get('type', 'unknown')})\n"
+    debug_log(debug, f"Created inputs docstring: \n{docstring}", 3)
+    return docstring
+
+def create_secrets_docstring(secrets, debug):
+    """Create a Markdown docstring for secrets."""
+    docstring = ""
+    if len(secrets) > 0:
+        docstring += "### Secrets\n\n"
+        for secret_name, secret_props in secrets.items():
+            docstring += f"- **{secret_name}**: {secret_props.get('description', 'No description provided.')} (type: {secret_props.get('type', 'unknown')})\n"
+    debug_log(debug, f"Created secrets docstring: \n{docstring}", 3)
+    return docstring
+
+def create_outputs_docstring(outputs, debug):
+    """Create a Markdown docstring for outputs."""
+    docstring = ""
+    if len(outputs) > 0:
+        docstring += "### Outputs\n\n"
+        for output_name, output_props in outputs.items():
+            docstring += f"- **{output_name}**: {output_props.get('description', 'No description provided.')} (type: {output_props.get('type', 'unknown')})\n"
+    debug_log(debug, f"Created outputs docstring: \n{docstring}", 3)
+    return docstring
+
+def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, full, debug):
+    """Create a Markdown docstring for examples."""
+    example_template_jinja = textwrap.dedent("""\
+    ### {full}
+    
+    ```yaml
+    ---
+    name: Example Workflow using this Action
+    on:
+      pull_request:
+
+    jobs:
+      example-job:
+        name: Example Job
+        steps:
+          - uses: actions/checkout@v3
+
+          - name: example-step
+            uses: {repo}@{branch}
+            with:
+    {inputs_section}
+    ```
+    """)
+    inputs_section = ""
+    for input_name, input_opts in inputs["inputs_required"].items():
+        inputs_section += f"          {input_name}: {input_opts.get('default', '<value>')}\n"
+
+    if full:
+      for input_name, input_opts in inputs["inputs"].items():
+          inputs_section += f"          {input_name}: {input_opts.get('default', '<value>')} # Optional\n"
+    
+    secrets_section = ""
+    for secret_name in secrets:
+        secrets_section += f"          {secret_name}: ${{{{ secrets.{secret_name} }}}}\n"
+    
+    outputs_section = ""
+    for output_name in outputs:
+        outputs_section += f"          {output_name}: ${{{{ steps.example_step.outputs.{output_name} }}}}\n"
+    
+    docstring = example_template_jinja.format(
+        repo=repo,
+        branch=branch,
+        inputs_section=inputs_section.rstrip(),
+        secrets_section=secrets_section.rstrip(),
+        outputs_section=outputs_section.rstrip(),
+        full="Full example usage" if full else "Simple example usage"
+    )
+    debug_log(debug, f"Created examples docstring: \n{docstring}", 3)
+    return docstring
+
+def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secrets, outputs, full, debug):
+    """Create a Markdown docstring for examples."""
+    example_template_jinja = textwrap.dedent("""\
+    ### {full}
+    
+    ```yaml
+    ---
+    name: workflow-example
+    on:
+      pull_request:
+
+    jobs:
+      example-job:
+        name: example job
+        uses: {repo}/{workflow_file}@main
+    {secrets_section}
+        with:
+    {inputs_section}
+    ```
+    """)
+    inputs_section = ""
+    for input_name, input_opts in inputs["inputs_required"].items():
+        inputs_section += f"      {input_name}: {input_opts.get('default', '<value>')}\n"
+
+    if full:
+      for input_name, input_opts in inputs["inputs"].items():
+          inputs_section += f"      {input_name}: {input_opts.get('default', '<value>')} # Optional\n"
+    
+    
+    if full:
+      secrets_section = "    secrets:\n"
+      for secret_name in secrets:
+          secrets_section += f"      {secret_name}: ${{{{ secrets.{secret_name} }}}}\n"
+    else :
+      secrets_section = "    secrets: inherit\n"
+    
+    outputs_section = ""
+    for output_name in outputs:
+        outputs_section += f"      {output_name}: ${{{{ steps.example_step.outputs.{output_name} }}}}\n"
+    
+    docstring = example_template_jinja.format(
+        repo=repo,
+        branch=branch,
+        workflow_file=workflow_file,
+        inputs_section=inputs_section.rstrip(),
+        secrets_section=secrets_section.rstrip(),
+        outputs_section=outputs_section.rstrip(),
+        full="Full example usage" if full else "Simple example usage"
+    )
+    debug_log(debug, f"Created examples docstring: \n{docstring}", 3)
+    return docstring
+
+def is_newdocs_different(old_docs, new_docs):
+    """Check if the new documentation content is different from the old."""
+    test = difflib.ndiff(old_docs.splitlines(), new_docs.splitlines())
+    debug_log(3, "\n".join(test), 3)
+
+    # return old_docs != new_docs
 
 if __name__ == "__main__":
     parser = configargparse.ArgParser(description=__doc__, add_env_var_help=True, auto_env_var_prefix="INPUT_")
@@ -471,14 +340,14 @@ if __name__ == "__main__":
         help="Commit message to use after updating the documentation",
     )
     parser.add_argument(
-        "--author",
+        "--commit-author",
         dest="author",
         default="github-actions[bot]",
         required=False,
         help="Author name to use for git commits",
     )
     parser.add_argument(
-        "--author-email",
+        "--commit-author-email",
         dest="author_email",
         default="github-actions[bot]@users.noreply.github.com",
         required=False,
@@ -489,7 +358,7 @@ if __name__ == "__main__":
         dest="debug",
         action="store_true",
         required=False,
-        help="Enable verbose logging and preview the diff without writing files",
+        help="Enable verbose logging, leve 1 to 3",
     )
     parser.add_argument(
         "--skip-commit",
@@ -498,91 +367,171 @@ if __name__ == "__main__":
         required=False,
         help="Update the doc file but skip git add/commit/push",
     )
+    parser.add_argument(
+        "--working-directory",
+        dest="working_directory",
+        default=None,
+        required=False,
+        help="Set the working directory for git operations",
+    )
     args = parser.parse_args()
 
+    if args.debug == False or args.debug.lower() == "false":
+        args.debug = 0
+    elif args.debug == True or args.debug.lower() == "true":
+        args.debug = 2
+    
     for test in args.__dict__:
-        debug_log(args.debug, f"Argument {test} = \"{args.__dict__[test]}\"")
+        debug_log(args.debug, f"Argument {test} = \"{args.__dict__[test]}\"", 1)
+    
+    env = determin_environment()
+    debug_log(args.debug, f"Running in {env} environment", 1)
 
-    if not args.workflow_file:
-        parser.error("--workflow-file (or INPUT_WORKFLOW_FILE) is required")
-    if not args.doc_file:
-        parser.error("--doc-file (or INPUT_DOC_FILE) is required")
+    workflow_content = parse_workflow_file(args.workflow_file, args.debug)
+    docs_file = load_docs_file(args.doc_file, args.debug)
+    docs_path = os.path.dirname(os.path.abspath(args.doc_file))
+    file_type = determin_workflow_or_action(workflow_content, args.debug)
+    script_path = os.path.dirname(os.path.abspath(__file__))
 
-    workflow_path = os.path.abspath(args.workflow_file)
-    doc_path = os.path.abspath(args.doc_file)
-    debug_log(args.debug, f"Loading workflow definition from {workflow_path}")
-    with open(workflow_path, "r", encoding="utf-8") as wf:
-        workflow = yaml.load(wf, Loader=yaml.CLoader)
-    with open(doc_path, "r", encoding="utf-8") as doc_file:
-        original_readme = doc_file.read()
+    if env == "github":
+        github_repo = os.environ.get("GITHUB_REPOSITORY", None)
+        github_branch = os.environ.get("GITHUB_HEAD_REF", None)
+        github_event_type = os.environ.get("GITHUB_EVENT_NAME", None)
+        working_dir = args.working_directory or os.environ.get("GITHUB_WORKSPACE", None)
 
-    repo_info = detect_repo_info(workflow_path, args.debug)
-    workflow_ref = repo_info["workflow_ref"]
-    action_ref = repo_info["action_ref"]
-    debug_log(args.debug, f"Generating documentation for ref '{workflow_ref}'.")
-
-    docstring = create_documentation(workflow, workflow_ref, action_ref)
-    updated_readme = replace_docstring(original_readme, docstring, args.start_token, args.end_token)
-
-    if updated_readme == original_readme:
-        debug_log(args.debug, "No changes detected; skipping file update and commit.")
-        sys.exit(0)
-
-    if args.debug:
-        diff = difflib.unified_diff(
-            original_readme.splitlines(),
-            updated_readme.splitlines(),
-            fromfile=f"{doc_path} (original)",
-            tofile=f"{doc_path} (updated)",
-            lineterm="",
-        )
-        diff_text = "\n".join(diff)
-        if diff_text:
-            print("[autodoc] Debug diff preview:\n" + diff_text)
+        if file_type == "action":
+            workflow_path = os.path.dirname(os.path.abspath(args.workflow_file))
         else:
-            print("[autodoc] Debug mode enabled but no diff produced.")
-        debug_log(args.debug, "Debug mode - not writing file or committing changes.")
-        sys.exit(0)
+          workflow_path = os.path.dirname(os.path.abspath(os.path.join(args.workflow_file, "../..")))
+        
+    else:
+        github_repo_url = subprocess.run(["git", "config", "--get", "remote.origin.url"], capture_output=True, text=True).stdout.strip()
+        github_repo = re.sub(r"^(?:.*github.com)(?:\/|:)(.*)(?:\.git)$", r"\1", github_repo_url)
+        github_branch = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True).stdout.strip()
+        github_event_type = "local-testing"
 
-    with open(doc_path, "w", encoding="utf-8") as doc_file:
-        doc_file.write(updated_readme)
-    debug_log(args.debug, f"Wrote updated documentation to {doc_path}.")
+        if file_type == "action":
+            workflow_path = os.path.dirname(os.path.abspath(args.workflow_file))
+        else:
+          workflow_path = os.path.dirname(os.path.abspath(os.path.join(args.workflow_file, "../..")))
+        
+        if workflow_path == docs_path:
+          working_dir = workflow_path
+        else:
+          working_dir = docs_path
+        
+    debug_log(args.debug, f"GitHub repo = {github_repo}", 0)
+    debug_log(args.debug, f"GitHub branch = {github_branch}", 0)
+    debug_log(args.debug, f"GitHub event type = {github_event_type}", 1)
+    
+    debug_log(args.debug, f"script path = {script_path}", 1)
+    debug_log(args.debug, f"docs directory = {docs_path}", 0)
+    debug_log(args.debug, f"{file_type} directory = {workflow_path}", 0)
+    debug_log(args.debug, f"Working directory = {working_dir}", 1)
 
-    if args.skip_commit:
-        debug_log(args.debug, "--skip-commit enabled; exiting before git operations.")
-        sys.exit(0)
+    match file_type:
+        case "action":
+            name = workflow_content.get("name", "")
+            description = workflow_content.get("description", "")
+            inputs = action_get_inputs(workflow_content, args.debug)
+            secrets = action_get_secrets(workflow_content, args.debug)
+            outputs = action_get_outputs(workflow_content, args.debug)
+            full_example_docstring = create_action_examples_docstring(github_repo, "v1", inputs, secrets, outputs, True, args.debug)
+            simple_example_docstring = create_action_examples_docstring(github_repo, "v1", inputs, secrets, outputs, False, args.debug)
+        case "workflow":
+            name = workflow_content.get("name", "")
+            description = workflow_content.get("description", "")
+            inputs = workflow_get_inputs(workflow_content, args.debug)
+            secrets = workflow_get_secrets(workflow_content, args.debug)
+            outputs = workflow_get_outputs(workflow_content, args.debug)
+            full_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, "v1", inputs, secrets, outputs, True, args.debug)
+            simple_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, "v1", inputs, secrets, outputs, False, args.debug)
+        case _:
+            print(f"[ERROR] Unable to determine if file is a GitHub Action or reusable workflow: {args.workflow_file}")
+            sys.exit(1)
 
-    repo_root = repo_info["repo_root"]
-    if not repo_root:
-        print("Error: Unable to determine git repository root; cannot commit changes.", file=sys.stderr)
+    debug_log(args.debug, f"{file_type} name: {name}", 1)
+    debug_log(args.debug, f"{file_type} description: {description}", 1)
+    debug_log(args.debug, f"{file_type} inputs: {inputs}", 2)
+    debug_log(args.debug, f"{file_type} secrets: {secrets}", 2)
+    debug_log(args.debug, f"{file_type} outputs: {outputs}", 2)        
+
+    inputs_docstring = create_inputs_docstring(inputs, args.debug)
+    secrets_docstring = create_secrets_docstring(secrets, args.debug)
+    outputs_docstring = create_outputs_docstring(outputs, args.debug)
+    
+    created_docstring = f"""\
+## {name or 'Unnamed ' + file_type.capitalize()}
+{description}
+{inputs_docstring}
+{secrets_docstring}
+{outputs_docstring}
+{simple_example_docstring}
+{full_example_docstring}
+"""
+    # debug_log(args.debug, f"Generated docstring: \n{created_docstring}", 2)
+
+    start_index, end_index = locate_docstring_section(docs_file, args.start_token, args.end_token, args.debug)
+    if start_index is None or end_index is None:
+        print(f"[ERROR] Could not find docstring section in {args.doc_file} between '{args.start_token}' and '{args.end_token}'")
         sys.exit(1)
 
-    doc_rel = os.path.relpath(doc_path, repo_root)
-    commit_env = os.environ.copy()
-    commit_env.update(
-        {
-            "GIT_AUTHOR_NAME": args.author,
-            "GIT_AUTHOR_EMAIL": args.author_email,
-            "GIT_COMMITTER_NAME": args.author,
-            "GIT_COMMITTER_EMAIL": args.author_email,
-        }
-    )
-
-    try:
-        debug_log(args.debug, f"Staging {doc_rel} for commit.")
-        subprocess.check_call(["git", "add", doc_rel], cwd=repo_root)
-        subprocess.check_call(["git", "commit", "-m", args.commit_message], cwd=repo_root, env=commit_env)
-        debug_log(args.debug, f"Committed changes to {doc_rel} with message '{args.commit_message}'.")
-    except subprocess.CalledProcessError as exc:
-        print(f"Error committing documentation changes: {exc}", file=sys.stderr)
-        sys.exit(exc.returncode)
-
-    branch = repo_info["branch"]
-
-    try:
-        debug_log(args.debug, f"Pushing branch {branch} to origin.")
-        subprocess.check_call(["git", "push", "origin", branch], cwd=repo_root)
-        debug_log(args.debug, f"Pushed changes on branch {branch}.")
-    except subprocess.CalledProcessError as exc:
-        print(f"Error pushing documentation changes: {exc}", file=sys.stderr)
-        sys.exit(exc.returncode)
+    new_docs_content = docs_file[:start_index] + "\n" + created_docstring + "\n" + docs_file[end_index:]
+    debug_log(args.debug, f"Generated new documentation content: \n{new_docs_content}", 3)
+    
+    if new_docs_content != docs_file:
+        debug_log(args.debug, "Documentation content has changed, updating file.", 0)
+        with open(args.doc_file, "w", encoding="utf-8") as f:
+            f.write(new_docs_content)
+        
+        if not args.skip_commit:
+            debug_log(args.debug, "Staging and committing changes.", 1)
+            try:
+              subprocess.run(["git", "config", "--global", "user.name", args.author], check=True)
+            except subprocess.CalledProcessError as e:
+              print(f"[ERROR] Git command ({e.cmd}) failed: {e.returncode}")
+              print(f"[ERROR] stdout: {e.stdout}")
+              print(f"[ERROR] stderr: {e.stderr}")
+              sys.exit(1)
+            try:
+              subprocess.run(["git", "config", "--global", "user.email", args.author_email], check=True)
+            except subprocess.CalledProcessError as e:
+              print(f"[ERROR] Git command ({e.cmd}) failed: {e.returncode}")
+              print(f"[ERROR] stdout: {e.stdout}")
+              print(f"[ERROR] stderr: {e.stderr}")
+              sys.exit(1)
+            try:
+              subprocess.run(["git", "config", "--global", "--add", "safe.directory", f"{working_dir}/"], check=True)
+            except subprocess.CalledProcessError as e:
+              print(f"[ERROR] Git command ({e.cmd}) failed: {e.returncode}")
+              print(f"[ERROR] stdout: {e.stdout}")
+              print(f"[ERROR] stderr: {e.stderr}")
+              sys.exit(1)
+            try:
+              subprocess.run(["git", "-C", f"{working_dir}/", "add", f"{working_dir}/{args.doc_file}"], check=True)
+            except subprocess.CalledProcessError as e:
+              print(f"[ERROR] Git command ({e.cmd}) failed: {e.returncode}")
+              print(f"[ERROR] stdout: {e.stdout}")
+              print(f"[ERROR] stderr: {e.stderr}")
+              sys.exit(1)
+            try:
+              subprocess.run(["git", "-C", f"{working_dir}/", "commit", "-m", "docs: update autogenerated docs"], check=True)
+            except subprocess.CalledProcessError as e:
+              print(f"[ERROR] Git command ({e.cmd}) failed: {e.returncode}")
+              print(f"[ERROR] stdout: {e.stdout}")
+              print(f"[ERROR] stderr: {e.stderr}")
+              sys.exit(1)
+            
+            subprocess.run(["git", "branch", f"--set-upstream-to=origin/{github_branch}", github_branch], check=True)
+            
+            try:
+              subprocess.run(["git", "-C", f"{working_dir}/", "push", "origin", f"{github_branch}"], check=True)
+            except subprocess.CalledProcessError as e:
+              print(f"[ERROR] Git command ({e.cmd}) failed: {e.returncode}")
+              print(f"[ERROR] stdout: {e.stdout}")
+              print(f"[ERROR] stderr: {e.stderr}")
+              sys.exit(1)
+        else:
+            debug_log(args.debug, "Skipping git commit as per --skip-commit flag.", 1)
+    else:
+        debug_log(args.debug, "No changes detected in documentation content. No update needed.", 1)

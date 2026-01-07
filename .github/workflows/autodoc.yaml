@@ -11,6 +11,8 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v3
+        with:
+          ref: ${{ env.BRANCH_NAME }}
 
       - name: Auto-generate Action Workflow Documentation
         uses: nrkno/github-action-action-workflow-autodoc@v1
