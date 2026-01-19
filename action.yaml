@@ -2,11 +2,6 @@
 name: "autodoc"
 description: |
   Update readme with workflow and action docs.
-
-  autodoc:
-    permissions:
-      contents: write
-      pull-requests: write
 inputs:
   workflow_file:
     description: "Path to the workflow file to document"
