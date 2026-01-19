@@ -5,4 +5,6 @@ RUN apk --no-cache add coreutils util-linux-misc git bash && pip3 install --no-c
 COPY autodoc.py /autodoc.py 
 COPY entrypoint.sh /entrypoint.sh
 
+WORKDIR /github/workspace/
+
 ENTRYPOINT ["/entrypoint.sh"]
