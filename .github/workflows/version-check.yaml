@@ -29,7 +29,7 @@ jobs:
 
       - name: Check Version
         id: check-version
-        uses: issue-ops/semver@5b8bb084b6834d03ddb5c7c96c683a588a2072ca # v2
+        uses: issue-ops/semver@e58d2f490332e0310a78e9a0e935d8d6f898e9e3 # v3
         with:
           check-only: true
           manifest-path: ${{ env.MANIFEST_PATH }}
