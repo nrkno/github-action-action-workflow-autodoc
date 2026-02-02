@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import uuid
 import yaml
 
 
@@ -128,11 +129,13 @@ def workflow_get_inputs(workflow_content, debug):
     if "inputs" in workflow_content["on"]["workflow_call"]:
         for input_name, input_props in workflow_content["on"]["workflow_call"]["inputs"].items():
             debug_log(debug, f"Processing input: {input_name}", 2)
-            if "required" in input_props:
+            if "required" in input_props and input_props["required"].lower() == "true":
+                debug_log(debug, f"Input {input_name} is required", 2)
                 input_props["required"] = str(input_props["required"]).lower()
                 if input_props["required"] == "true":
                     all_inputs["inputs_required"][input_name] = input_props
             else:
+                debug_log(debug, f"Input {input_name} is optional", 2)
                 all_inputs["inputs"][input_name] = input_props
     debug_log(debug, f"Found inputs: {all_inputs}", 3)
     return all_inputs
@@ -159,37 +162,66 @@ def workflow_get_secrets(workflow_content, debug):
     debug_log(debug, f"Found secrets: {all_secrets}", 2)
     return all_secrets
 
-def create_inputs_docstring(inputs, debug):
+def create_inputs_docstring(inputs, table, debug):
     """Create a Markdown docstring for inputs."""
     docstring = ""
     if len(inputs["inputs_required"]) > 0:
-        docstring += "### Required Inputs\n\n"
+        if table:
+          docstring = "### Required Inputs\n\n|Input name|Description|Type|Default|\n|---|---|---|---|\n"
+        else:
+          docstring = "### Required Inputs\n\n"
+        
         for input_name, input_props in inputs["inputs_required"].items():
-            docstring += f"- **{input_name}**: {input_props.get('description', 'No description provided.')} (type: {input_props.get('type', 'unknown')})\n"
+            if table:
+              docstring += f"|**{input_name}**|{input_props.get('description', 'No description provided.').replace('\n', '<br>')}|{input_props.get('type', 'string')}|`{input_props.get('default', 'unknown')}`|\n"
+            else:
+              docstring += f"- **{input_name}**: {input_props.get('description', 'No description provided.').replace('\n', '   <br>')} (Default: `{input_props.get('default', 'None')}`, type: {input_props.get('type', 'string')})\n"
     if len(inputs["inputs"]) > 0:
-        docstring += "\n### Optional Inputs\n\n"
+        if table:
+          docstring += "\n### Optional Inputs\n\n|Input name|Description|Type|Default|\n|---|---|---|---|\n"
+        else:
+          docstring += "\n### Optional Inputs\n\n"
+        
         for input_name, input_props in inputs["inputs"].items():
-            docstring += f"- **{input_name}**: {input_props.get('description', 'No description provided.')} (Default: \"{input_props.get('default', 'None')}\", type: {input_props.get('type', 'unknown')})\n"
+            if table:
+              docstring += f"|**{input_name}**|{input_props.get('description', 'No description provided.').replace('\n', '<br>')}|{input_props.get('type', 'string')}|`{input_props.get('default', 'None')}`|\n"
+            else:
+              docstring += f"- **{input_name}**: {input_props.get('description', 'No description provided.').replace('\n', '   <br>')} (Default: `{input_props.get('default', 'None')}`, type: {input_props.get('type', 'string')})\n"
     debug_log(debug, f"Created inputs docstring: \n{docstring}", 3)
     return docstring
 
-def create_secrets_docstring(secrets, debug):
+def create_secrets_docstring(secrets, table, debug):
     """Create a Markdown docstring for secrets."""
     docstring = ""
     if len(secrets) > 0:
-        docstring += "### Secrets\n\n"
+        if table:
+          docstring = "### Secrets\n\n|Secret name|Description|Type|\n|---|---|---|\n"
+        else:
+          docstring += "### Secrets\n\n"
+        
         for secret_name, secret_props in secrets.items():
-            docstring += f"- **{secret_name}**: {secret_props.get('description', 'No description provided.')} (type: {secret_props.get('type', 'unknown')})\n"
+            if table:
+              docstring += f"|**{secret_name}**|{secret_props.get('description', 'No description provided.').replace('\n', '<br>')}|{secret_props.get('type', 'unknown')}|\n"
+            else:
+              docstring += f"- **{secret_name}**: {secret_props.get('description', 'No description provided.')} (type: {secret_props.get('type', 'unknown')})\n"
+            
     debug_log(debug, f"Created secrets docstring: \n{docstring}", 3)
     return docstring
 
-def create_outputs_docstring(outputs, debug):
+def create_outputs_docstring(outputs, table, debug):
     """Create a Markdown docstring for outputs."""
     docstring = ""
     if len(outputs) > 0:
-        docstring += "### Outputs\n\n"
+        if table:
+          docstring = "### Outputs\n\n|Output name|Description|\n|---|---|\n"
+        else:
+          docstring += "### Outputs\n\n"
+        
         for output_name, output_props in outputs.items():
-            docstring += f"- **{output_name}**: {output_props.get('description', 'No description provided.')} (type: {output_props.get('type', 'unknown')})\n"
+            if table:
+              docstring += f"|{output_name}|{output_props.get('description', 'No description provided.').replace('\n', '<br>')}|\n"
+            else:
+              docstring += f"- **{output_name}**: {output_props.get('description', 'No description provided.')} (type: {output_props.get('type', 'unknown')})\n"
     debug_log(debug, f"Created outputs docstring: \n{docstring}", 3)
     return docstring
 
@@ -265,11 +297,11 @@ def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secr
     """)
     inputs_section = ""
     for input_name, input_opts in inputs["inputs_required"].items():
-        inputs_section += f"      {input_name}: {input_opts.get('default', '<value>')}\n"
+        inputs_section += f"      {input_name}: `{input_opts.get('default', '<value>')}`\n"
 
     if full:
       for input_name, input_opts in inputs["inputs"].items():
-          inputs_section += f"      {input_name}: {input_opts.get('default', '<value>')} # Optional\n"
+          inputs_section += f"      {input_name}: `{input_opts.get('default', '<value>')}` # Optional\n"
     
     
     if full:
@@ -302,6 +334,22 @@ def is_newdocs_different(old_docs, new_docs):
 
     # return old_docs != new_docs
 
+def input_text_to_bool(input_text):
+    """Convert various text representations of boolean to actual boolean."""
+    if isinstance(input_text, bool):
+        return input_text
+    if input_text.lower() in ["true", "1", "yes", "on"]:
+        return True
+    return False
+
+def set_github_output(name, value):
+    """Sets a multiline GitHub Action output variable using a unique delimiter."""
+    with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+        delimiter = uuid.uuid1()
+        print(f'{name}<<{delimiter}', file=fh)
+        print(value, file=fh)
+        print(delimiter, file=fh)
+
 if __name__ == "__main__":
     parser = configargparse.ArgParser(description=__doc__, add_env_var_help=True, auto_env_var_prefix="INPUT_")
     parser.add_argument(
@@ -333,25 +381,25 @@ if __name__ == "__main__":
         help="Marker indicating where autogenerated docs end",
     )
     parser.add_argument(
-        "--commit-message",
-        dest="commit_message",
-        default="docs: update autogenerated docs",
+        "--table",
+        dest="table",
+        default="False",
         required=False,
-        help="Commit message to use after updating the documentation",
+        help="Output inputs, secrets, and outputs as markdown tables",
     )
     parser.add_argument(
-        "--commit-author",
-        dest="author",
-        default="github-actions[bot]",
+        "--working-directory",
+        dest="working_directory",
+        default=None,
         required=False,
-        help="Author name to use for git commits",
+        help="Set the working directory for git operations",
     )
     parser.add_argument(
-        "--commit-author-email",
-        dest="author_email",
-        default="github-actions[bot]@users.noreply.github.com",
+        "--github-output",
+        dest="github_output",
+        default="False",
         required=False,
-        help="Author email to use for git commits",
+        help="Print documented inputs, secrets, and outputs to GitHub Action outputs",
     )
     parser.add_argument(
         "--debug",
@@ -361,20 +409,7 @@ if __name__ == "__main__":
         required=False,
         help="Enable verbose logging, leve 1 to 3",
     )
-    parser.add_argument(
-        "--skip-commit",
-        dest="skip_commit",
-        action="store_true",
-        required=False,
-        help="Update the doc file but skip git add/commit/push",
-    )
-    parser.add_argument(
-        "--working-directory",
-        dest="working_directory",
-        default=None,
-        required=False,
-        help="Set the working directory for git operations",
-    )
+    
     args = parser.parse_args()
 
     if args.debug == False or args.debug.lower() == "false":
@@ -387,6 +422,9 @@ if __name__ == "__main__":
         except ValueError:
             args.debug = 0
     
+    args.table = input_text_to_bool(args.table)
+    args.github_output = input_text_to_bool(args.github_output)
+
     for test in args.__dict__:
         debug_log(args.debug, f"Argument {test} = \"{args.__dict__[test]}\"", 1)
     
@@ -464,9 +502,9 @@ if __name__ == "__main__":
     debug_log(args.debug, f"{file_type} secrets: {secrets}", 2)
     debug_log(args.debug, f"{file_type} outputs: {outputs}", 2)        
 
-    inputs_docstring = create_inputs_docstring(inputs, args.debug)
-    secrets_docstring = create_secrets_docstring(secrets, args.debug)
-    outputs_docstring = create_outputs_docstring(outputs, args.debug)
+    inputs_docstring = create_inputs_docstring(inputs, args.table, args.debug)
+    secrets_docstring = create_secrets_docstring(secrets, args.table, args.debug)
+    outputs_docstring = create_outputs_docstring(outputs, args.table, args.debug)
     
     created_docstring = f"""\
 ## {name or 'Unnamed ' + file_type.capitalize()}
@@ -477,6 +515,11 @@ if __name__ == "__main__":
 {simple_example_docstring}
 {full_example_docstring}
 """
+    
+    if args.github_output:
+        set_github_output("autodoc_out", created_docstring)
+        debug_log(args.debug, "Set GitHub Action output 'autodoc_out'", 1)
+    
     # debug_log(args.debug, f"Generated docstring: \n{created_docstring}", 2)
 
     start_index, end_index = locate_docstring_section(docs_file, args.start_token, args.end_token, args.debug)

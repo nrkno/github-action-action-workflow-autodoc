@@ -4,38 +4,44 @@ description: |
   Update readme with workflow and action docs.
 inputs:
   workflow_file:
-    description: "Path to the workflow file to document"
+    description: |
+      Path to the workflow or action file to document
+      example workflow: `.github/workflows/plan.yaml`
+      example action: `action.yaml`
     required: true
     default: ".github/workflows/plan.yaml"
   doc_file:
-    description: "Path to the markdown file to update with documentation"
+    description: |
+      Path to the markdown file to update with documentation
+      example: README.md
     required: true
     default: "README.md"
   start_token:
-    description: "Token marking the start of the autodoc section"
+    description: |
+      Token marking the start of the autodoc section
+      default value: <!-- autodoc start -->
     required: false
     default: "<!-- autodoc start -->"
   end_token:
     description: "Token marking the end of the autodoc section"
     required: false
     default: "<!-- autodoc end -->"
-  commit_message:
-    description: "Commit message to use when committing changes"
+  table:
+    description: "Format inputs as a markdown table"
     required: false
-  author:
-    description: "Author name to use for git commits"
+    default: "true"
+  github-output:
+    description: "Print documented inputs, secrets, and outputs to GitHub Action outputs"
     required: false
-  author_email:
-    description: "Author email to use for git commits"
-    required: false
+    default: "false"
   debug:
     description: "Print debug messages. 0=none, 1=some, 2=more, 3=all"
     required: false
     default: "0"
-  skip_commit:
-    description: "Skip git add/commit/push and only update the doc file"
-    required: false
-    default: "false"
+
+outputs:
+  autodoc_out:
+    description: "If enabled, the generated documentation for inputs, secrets, and outputs"
 
 runs:
   using: "docker"
