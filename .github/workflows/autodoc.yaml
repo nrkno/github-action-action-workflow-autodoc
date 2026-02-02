@@ -2,20 +2,18 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   autodoc:
-    name: Auto-generate Action Workflow Documentation
-    runs-on: ["nrk-azure-intern", "linux"]
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
-        with:
-          ref: ${{ env.BRANCH_NAME }}
-
-      - name: Auto-generate Action Workflow Documentation
-        uses: nrkno/github-action-action-workflow-autodoc@v1
-        with:
-          workflow_file: action.yaml
-          doc_file: README.md
+    name: Auto-generated workflow documentation
+    uses: nrkno/github-workflow-action-workflow-autodoc/.github/workflows/workflow.yaml@ac1f8f7fdd61ab01996b1ac1ee4cba5b6a558336 # v1.1.0
+    with:
+      runs-on: '["nrk-azure-intern","linux"]'
+      workflow_file: .github/workflows/workflow.yaml
+      doc_file: README.md
+      start_token: "<!-- start -->"
+      end_token: "<!-- end -->"
+      table: "true"
+      github_output: "true"
