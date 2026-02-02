@@ -8,20 +8,27 @@ Update readme with workflow and action docs.
 
 ### Required Inputs
 
-- **workflow_file**: Path to the workflow file to document (type: unknown)
-- **doc_file**: Path to the markdown file to update with documentation (type: unknown)
+|Input name|Description|Type|Default|
+|---|---|---|---|
+|**workflow_file**|Path to the workflow or action file to document<br>example workflow: `.github/workflows/plan.yaml`<br>example action: `action.yaml`<br>|string|`.github/workflows/plan.yaml`|
+|**doc_file**|Path to the markdown file to update with documentation<br>example: README.md<br>|string|`README.md`|
 
 ### Optional Inputs
 
-- **start_token**: Token marking the start of the autodoc section (Default: "<!-- autodoc start -->", type: unknown)
-- **end_token**: Token marking the end of the autodoc section (Default: "<!-- autodoc end -->", type: unknown)
-- **commit_message**: Commit message to use when committing changes (Default: "None", type: unknown)
-- **author**: Author name to use for git commits (Default: "None", type: unknown)
-- **author_email**: Author email to use for git commits (Default: "None", type: unknown)
-- **debug**: Print debug messages. 0=none, 1=some, 2=more, 3=all (Default: "0", type: unknown)
-- **skip_commit**: Skip git add/commit/push and only update the doc file (Default: "false", type: unknown)
+|Input name|Description|Type|Default|
+|---|---|---|---|
+|**start_token**|Token marking the start of the autodoc section<br>default value: <!-- autodoc start --><br>|string|`<!-- autodoc start -->`|
+|**end_token**|Token marking the end of the autodoc section|string|`<!-- autodoc end -->`|
+|**table**|Format inputs as a markdown table|string|`true`|
+|**github-output**|Print documented inputs, secrets, and outputs to GitHub Action outputs|string|`false`|
+|**debug**|Print debug messages. 0=none, 1=some, 2=more, 3=all|string|`0`|
 
 
+### Outputs
+
+|Output name|Description|
+|---|---|
+|autodoc_out|If enabled, the generated documentation for inputs, secrets, and outputs|
 
 ### Simple example usage
 
@@ -65,11 +72,9 @@ jobs:
           doc_file: README.md
           start_token: <!-- autodoc start --> # Optional
           end_token: <!-- autodoc end --> # Optional
-          commit_message: <value> # Optional
-          author: <value> # Optional
-          author_email: <value> # Optional
+          table: true # Optional
+          github-output: false # Optional
           debug: 0 # Optional
-          skip_commit: false # Optional
 ```
 
 
