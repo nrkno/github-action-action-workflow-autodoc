@@ -1,5 +1,5 @@
 # action.yml
-name: "autodoc"
+name: Github action - Autodoc
 description: |
   Update readme with workflow and action docs.
 inputs:
