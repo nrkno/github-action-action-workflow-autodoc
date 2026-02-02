@@ -342,13 +342,14 @@ def input_text_to_bool(input_text):
         return True
     return False
 
-def set_github_output(name, value):
+def set_github_output(name, value, file_type):
     """Sets a multiline GitHub Action output variable using a unique delimiter."""
     with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
         delimiter = uuid.uuid1()
         print(f'{name}<<{delimiter}', file=fh)
         print(value, file=fh)
         print(delimiter, file=fh)
+        print(f'input_type={file_type}', file=fh)
 
 if __name__ == "__main__":
     parser = configargparse.ArgParser(description=__doc__, add_env_var_help=True, auto_env_var_prefix="INPUT_")
@@ -517,7 +518,7 @@ if __name__ == "__main__":
 """
     
     if args.github_output:
-        set_github_output("autodoc_out", created_docstring)
+        set_github_output("autodoc_out", created_docstring, file_type)
         debug_log(args.debug, "Set GitHub Action output 'autodoc_out'", 1)
     
     # debug_log(args.debug, f"Generated docstring: \n{created_docstring}", 2)

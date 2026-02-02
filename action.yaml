@@ -30,7 +30,7 @@ inputs:
     description: "Format inputs as a markdown table"
     required: false
     default: "true"
-  github-output:
+  github_output:
     description: "Print documented inputs, secrets, and outputs to GitHub Action outputs"
     required: false
     default: "false"
@@ -40,6 +40,8 @@ inputs:
     default: "0"
 
 outputs:
+  file_type:
+    description: "The type automaticly detected by the script of the input_file documented: workflow or action"
   autodoc_out:
     description: "If enabled, the generated documentation for inputs, secrets, and outputs"
 
