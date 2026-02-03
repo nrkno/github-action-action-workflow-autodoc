@@ -17,6 +17,7 @@ import textwrap
 import uuid
 import yaml
 
+summary = ""
 
 def debug_log(enabled, message, level=0):
     """Usage: call with the `--debug` flag to emit verbose trace statements."""
@@ -94,6 +95,7 @@ def action_get_inputs(workflow_content, debug):
             all_inputs["inputs"][input_name] = input_props
     
     debug_log(debug, f"Found inputs: {len(all_inputs['inputs']) + len(all_inputs['inputs_required'])}", 0)
+    add_to_summary(f"Found inputs: {len(all_inputs['inputs']) + len(all_inputs['inputs_required'])}")
     debug_log(debug, f"Found input: {all_inputs}", 3)
     return all_inputs
 
@@ -105,6 +107,7 @@ def action_get_outputs(workflow_content, debug):
             debug_log(debug, f"Processing output: {output_name}", 2)
             all_outputs[output_name] = output_props
     debug_log(debug, f"Found outputs: {len(all_outputs)}", 0)
+    add_to_summary(f"Found outputs: {len(all_outputs)}")
     debug_log(debug, f"Found outputs: {all_outputs}", 2)
     return all_outputs
 
@@ -116,6 +119,7 @@ def action_get_secrets(workflow_content, debug):
             debug_log(debug, f"Processing secret: {secret_name}", 2)
             all_secrets[secret_name] = secret_props
     debug_log(debug, f"Found secrets: {len(all_secrets)}", 0)
+    add_to_summary(f"Found secrets: {len(all_secrets)}")
     debug_log(debug, f"Found secrets: {all_secrets}", 2)
     return all_secrets
 
@@ -138,6 +142,8 @@ def workflow_get_inputs(workflow_content, debug):
                 debug_log(debug, f"Input {input_name} is optional", 2)
                 all_inputs["inputs"][input_name] = input_props
     debug_log(debug, f"Found inputs: {all_inputs}", 3)
+    add_to_summary(f"Found inputs: {len(all_inputs['inputs']) + len(all_inputs['inputs_required'])}")
+    debug_log(debug, f"Found inputs: {len(all_inputs['inputs']) + len(all_inputs['inputs_required'])}", 0)
     return all_inputs
 
 def workflow_get_outputs(workflow_content, debug):
@@ -149,6 +155,8 @@ def workflow_get_outputs(workflow_content, debug):
             debug_log(debug, f"Processing output: {output_name}", 2)
             all_outputs[output_name] = output_props
     debug_log(debug, f"Found outputs: {all_outputs}", 2)
+    add_to_summary(f"Found outputs: {len(all_outputs)}")
+    debug_log(debug, f"Found outputs: {len(all_outputs)}", 0)
     return all_outputs
 
 def workflow_get_secrets(workflow_content, debug):
@@ -160,6 +168,8 @@ def workflow_get_secrets(workflow_content, debug):
             debug_log(debug, f"Processing secret: {secret_name}", 2)
             all_secrets[secret_name] = secret_props
     debug_log(debug, f"Found secrets: {all_secrets}", 2)
+    add_to_summary(f"Found secrets: {len(all_secrets)}")
+    debug_log(debug, f"Found secrets: {len(all_secrets)}", 0)
     return all_secrets
 
 def create_inputs_docstring(inputs, table, debug):
@@ -240,12 +250,20 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
       example-job:
         name: Example Job
         steps:
-          - uses: actions/checkout@v3
+          - uses: actions/checkout@v6
+            with:
+              ref: ${{ github.head_ref }}
+              persist-credentials: true
 
           - name: example-step
             uses: {repo}@{branch}
             with:
     {inputs_section}
+    
+          - name: Commit and push changes
+            uses: stefanzweifel/git-auto-commit-action@v7
+            with:
+              commit_message: "docs(autodoc): update documentation"
     ```
     """)
     inputs_section = ""
@@ -278,7 +296,7 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
 def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secrets, outputs, full, debug):
     """Create a Markdown docstring for examples."""
     example_template_jinja = textwrap.dedent("""\
-    ### {full}
+    ### {full} (using steps 'uses' syntax)
     
     ```yaml
     ---
@@ -288,32 +306,28 @@ def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secr
 
     jobs:
       example-job:
-        name: example job
-        uses: {repo}/{workflow_file}@main
-    {secrets_section}
-        with:
+        steps:
+          - name: example job
+            id: example_step
+            uses: {repo}/{workflow_file}@main{secrets_section}
+            with:
     {inputs_section}
     ```
     """)
     inputs_section = ""
     for input_name, input_opts in inputs["inputs_required"].items():
-        inputs_section += f"      {input_name}: `{input_opts.get('default', '<value>')}`\n"
+        inputs_section += f"          {input_name}: '{input_opts.get('default', '<value>')}'\n"
 
     if full:
       for input_name, input_opts in inputs["inputs"].items():
-          inputs_section += f"      {input_name}: `{input_opts.get('default', '<value>')}` # Optional\n"
+          inputs_section += f"          {input_name}: '{input_opts.get('default', '<value>')}'\n"
     
     
-    if full:
-      secrets_section = "    secrets:\n"
+    secrets_section = ""
+    if full and len(secrets) > 0:
+      secrets_section = "\n        secrets:\n"
       for secret_name in secrets:
-          secrets_section += f"      {secret_name}: ${{{{ secrets.{secret_name} }}}}\n"
-    else :
-      secrets_section = "    secrets: inherit\n"
-    
-    outputs_section = ""
-    for output_name in outputs:
-        outputs_section += f"      {output_name}: ${{{{ steps.example_step.outputs.{output_name} }}}}\n"
+          secrets_section += f"          {secret_name}: '${{{{ secrets.{secret_name} }}}}'\n"
     
     docstring = example_template_jinja.format(
         repo=repo,
@@ -321,7 +335,6 @@ def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secr
         workflow_file=workflow_file,
         inputs_section=inputs_section.rstrip(),
         secrets_section=secrets_section.rstrip(),
-        outputs_section=outputs_section.rstrip(),
         full="Full example usage" if full else "Simple example usage"
     )
     debug_log(debug, f"Created examples docstring: \n{docstring}", 3)
@@ -350,6 +363,16 @@ def set_github_output(name, value, file_type):
         print(value, file=fh)
         print(delimiter, file=fh)
         print(f'input_type={file_type}', file=fh)
+
+def add_to_summary(message):
+    """Adds a message to the GitHub Action summary (not implemented)."""
+    global summary
+    summary += f"{message}\n"
+
+def set_github_action_summary(summary_content):
+    """Sets the GitHub Action summary (not implemented)."""
+    with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+      f.write(summary_content)
 
 if __name__ == "__main__":
     parser = configargparse.ArgParser(description=__doc__, add_env_var_help=True, auto_env_var_prefix="INPUT_")
@@ -396,13 +419,6 @@ if __name__ == "__main__":
         help="Set the working directory for git operations",
     )
     parser.add_argument(
-        "--github-output",
-        dest="github_output",
-        default="False",
-        required=False,
-        help="Print documented inputs, secrets, and outputs to GitHub Action outputs",
-    )
-    parser.add_argument(
         "--debug",
         dest="debug",
         metavar="LEVEL",
@@ -424,7 +440,6 @@ if __name__ == "__main__":
             args.debug = 0
     
     args.table = input_text_to_bool(args.table)
-    args.github_output = input_text_to_bool(args.github_output)
 
     for test in args.__dict__:
         debug_log(args.debug, f"Argument {test} = \"{args.__dict__[test]}\"", 1)
@@ -483,16 +498,16 @@ if __name__ == "__main__":
             inputs = action_get_inputs(workflow_content, args.debug)
             secrets = action_get_secrets(workflow_content, args.debug)
             outputs = action_get_outputs(workflow_content, args.debug)
-            full_example_docstring = create_action_examples_docstring(github_repo, "v1", inputs, secrets, outputs, True, args.debug)
-            simple_example_docstring = create_action_examples_docstring(github_repo, "v1", inputs, secrets, outputs, False, args.debug)
+            full_example_docstring = create_action_examples_docstring(github_repo, "v2", inputs, secrets, outputs, True, args.debug)
+            simple_example_docstring = create_action_examples_docstring(github_repo, "v2", inputs, secrets, outputs, False, args.debug)
         case "workflow":
             name = workflow_content.get("name", "")
             description = workflow_content.get("description", "")
             inputs = workflow_get_inputs(workflow_content, args.debug)
             secrets = workflow_get_secrets(workflow_content, args.debug)
             outputs = workflow_get_outputs(workflow_content, args.debug)
-            full_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, "v1", inputs, secrets, outputs, True, args.debug)
-            simple_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, "v1", inputs, secrets, outputs, False, args.debug)
+            full_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, "v2", inputs, secrets, outputs, True, args.debug)
+            simple_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, "v2", inputs, secrets, outputs, False, args.debug)
         case _:
             print(f"[ERROR] Unable to determine if file is a GitHub Action or reusable workflow: {args.workflow_file}")
             sys.exit(1)
@@ -501,7 +516,13 @@ if __name__ == "__main__":
     debug_log(args.debug, f"{file_type} description: {description}", 1)
     debug_log(args.debug, f"{file_type} inputs: {inputs}", 2)
     debug_log(args.debug, f"{file_type} secrets: {secrets}", 2)
-    debug_log(args.debug, f"{file_type} outputs: {outputs}", 2)        
+    debug_log(args.debug, f"{file_type} outputs: {outputs}", 2)
+
+    add_to_summary(f"GitHub repo = {github_repo}")
+    add_to_summary(f"GitHub branch = {github_branch}")
+    add_to_summary(f"GitHub event type = {github_event_type}")
+    add_to_summary(f"File type = {file_type}")
+    add_to_summary(f"{file_type.capitalize()} name = {name}")
 
     inputs_docstring = create_inputs_docstring(inputs, args.table, args.debug)
     secrets_docstring = create_secrets_docstring(secrets, args.table, args.debug)
@@ -517,11 +538,12 @@ if __name__ == "__main__":
 {full_example_docstring}
 """
     
-    if args.github_output:
+    if env == "github":
         set_github_output("autodoc_out", created_docstring, file_type)
-        debug_log(args.debug, "Set GitHub Action output 'autodoc_out'", 1)
-    
-    # debug_log(args.debug, f"Generated docstring: \n{created_docstring}", 2)
+        set_github_action_summary(summary)
+    elif env == "local":
+        print("Summary of findings:")
+        print(summary)
 
     start_index, end_index = locate_docstring_section(docs_file, args.start_token, args.end_token, args.debug)
     if start_index is None or end_index is None:

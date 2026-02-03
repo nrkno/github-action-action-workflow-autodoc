@@ -30,10 +30,6 @@ inputs:
     description: "Format inputs as a markdown table"
     required: false
     default: "true"
-  github_output:
-    description: "Print documented inputs, secrets, and outputs to GitHub Action outputs"
-    required: false
-    default: "false"
   debug:
     description: "Print debug messages. 0=none, 1=some, 2=more, 3=all"
     required: false
@@ -47,4 +43,4 @@ outputs:
 
 runs:
   using: "docker"
-  image: "docker://ghcr.io/nrkno/github-action-action-workflow-autodoc:v2.0.3"
+  image: "docker://ghcr.io/nrkno/github-action-action-workflow-autodoc:v2.1.0"
