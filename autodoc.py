@@ -6,18 +6,275 @@ Markdown format. Replaces the all content between `<!-- autodoc start -->` and
 stigok NRK June 2023
 bateau84 NRK January 2026
 """
-import configargparse
+import argparse
 import difflib
-import json
 import os
 import re
 import subprocess
 import sys
 import textwrap
 import uuid
-import yaml
 
 summary = ""
+
+# ---------------------------------------------------------------------------
+# Minimal YAML parser (subset sufficient for GitHub Action / reusable workflow
+# files). Mirrors PyYAML's BaseLoader behaviour: every scalar is returned as a
+# Python str, with no implicit type conversion.
+# Supported features:
+#   - Block-style mappings (key: value) with arbitrary nesting via indentation
+#   - Block-style sequences ("- item")
+#   - Plain, single-quoted and double-quoted scalars
+#   - Block scalars (`|`, `>`, with `-`/`+` chomp indicators)
+#   - Comments (`#` outside of quoted strings)
+#   - Document separators (`---`, `...`)
+# ---------------------------------------------------------------------------
+
+def _strip_comment(line):
+    """Strip a trailing ``# comment`` while respecting quoted strings."""
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "\\" and in_double and i + 1 < len(line):
+            i += 2
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == '#' and not in_single and not in_double:
+            if i == 0 or line[i - 1] in (' ', '\t'):
+                return line[:i].rstrip()
+        i += 1
+    return line.rstrip()
+
+def _tokenize(text):
+    """Split text into per-line tokens with indent, content and blank flag."""
+    tokens = []
+    for raw in text.splitlines():
+        stripped = raw.rstrip()
+        if stripped in ('---', '...'):
+            tokens.append({'blank': True, 'indent': 0, 'content': ''})
+            continue
+        clean = _strip_comment(stripped)
+        if clean.strip() == '':
+            tokens.append({'blank': True, 'indent': 0, 'content': ''})
+            continue
+        indent = len(clean) - len(clean.lstrip(' '))
+        tokens.append({'blank': False, 'indent': indent, 'content': clean[indent:]})
+    return tokens
+
+_DOUBLE_ESCAPES = {
+    'n': '\n', 't': '\t', 'r': '\r', '0': '\0',
+    '"': '"', "'": "'", '\\': '\\', '/': '/',
+    ' ': ' ', 'a': '\a', 'b': '\b', 'f': '\f', 'v': '\v',
+}
+
+def _unquote_double(s):
+    out = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == '\\' and i + 1 < len(s):
+            nx = s[i + 1]
+            out.append(_DOUBLE_ESCAPES.get(nx, nx))
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return ''.join(out)
+
+def _unquote(value):
+    """Strip surrounding quotes and decode minimal escapes."""
+    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+        return _unquote_double(value[1:-1])
+    if len(value) >= 2 and value[0] == "'" and value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    return value
+
+def _split_key_value(content):
+    """Split ``key: value`` at the first colon outside of quoted strings."""
+    in_single = in_double = False
+    i = 0
+    while i < len(content):
+        ch = content[i]
+        if ch == '\\' and in_double and i + 1 < len(content):
+            i += 2
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == ':' and not in_single and not in_double:
+            nxt = content[i + 1:i + 2]
+            if nxt == '' or nxt in (' ', '\t'):
+                key = content[:i].strip()
+                value = content[i + 1:].strip()
+                if len(key) >= 2 and key[0] == key[-1] and key[0] in ('"', "'"):
+                    key = _unquote(key)
+                return key, value, True
+        i += 1
+    return content, '', False
+
+def _next_significant(lines, idx):
+    while idx < len(lines) and lines[idx]['blank']:
+        idx += 1
+    return idx
+
+def _read_block_scalar(lines, idx, parent_indent, header):
+    """Read a ``|`` or ``>`` block scalar following a key on ``parent_indent``."""
+    indicator = header[0]
+    chomp = header[1:].strip()
+    block_lines = []
+    block_indent = None
+    while idx < len(lines):
+        ln = lines[idx]
+        if ln['blank']:
+            block_lines.append('')
+            idx += 1
+            continue
+        if ln['indent'] <= parent_indent:
+            break
+        if block_indent is None:
+            block_indent = ln['indent']
+        rel = ln['indent'] - block_indent
+        block_lines.append(' ' * max(0, rel) + ln['content'])
+        idx += 1
+    while block_lines and block_lines[-1] == '':
+        block_lines.pop()
+
+    if indicator == '|':
+        value = '\n'.join(block_lines)
+    else:  # '>' folded
+        folded = []
+        buf = []
+        for ln in block_lines:
+            if ln == '':
+                if buf:
+                    folded.append(' '.join(buf))
+                    buf = []
+                folded.append('')
+            else:
+                buf.append(ln)
+        if buf:
+            folded.append(' '.join(buf))
+        value = '\n'.join(folded)
+
+    if chomp == '+':
+        value += '\n'
+    elif chomp == '-':
+        pass
+    else:
+        value += '\n'
+    return value, idx
+
+def _parse_value_after_key(lines, idx, parent_indent, val):
+    """Resolve the value that follows a ``key:`` on ``parent_indent``."""
+    if val.startswith('|') or val.startswith('>'):
+        return _read_block_scalar(lines, idx, parent_indent, val)
+    if val == '':
+        nxt = _next_significant(lines, idx)
+        if nxt < len(lines) and lines[nxt]['indent'] > parent_indent:
+            return _parse_block(lines, idx, lines[nxt]['indent'])
+        return None, idx
+    return _unquote(val), idx
+
+def _parse_block(lines, idx, indent):
+    """Dispatch to mapping or list parsing depending on the next significant line."""
+    nxt = _next_significant(lines, idx)
+    if nxt >= len(lines) or lines[nxt]['indent'] < indent:
+        return None, idx
+    if lines[nxt]['content'].startswith('- ') or lines[nxt]['content'] == '-':
+        return _parse_list(lines, idx, indent)
+    return _parse_mapping(lines, idx, indent)
+
+def _parse_mapping(lines, idx, indent):
+    result = {}
+    while idx < len(lines):
+        ln = lines[idx]
+        if ln['blank']:
+            idx += 1
+            continue
+        if ln['indent'] < indent:
+            break
+        if ln['indent'] > indent:
+            idx += 1
+            continue
+        key, val, ok = _split_key_value(ln['content'])
+        if not ok:
+            idx += 1
+            continue
+        idx += 1
+        result[key], idx = _parse_value_after_key(lines, idx, indent, val)
+    return result, idx
+
+def _parse_list(lines, idx, indent):
+    result = []
+    while idx < len(lines):
+        ln = lines[idx]
+        if ln['blank']:
+            idx += 1
+            continue
+        if ln['indent'] < indent:
+            break
+        if ln['indent'] > indent:
+            idx += 1
+            continue
+        content = ln['content']
+        if not (content.startswith('- ') or content == '-'):
+            break
+        rest = content[2:] if content.startswith('- ') else ''
+        item_indent = indent + 2
+
+        key, val, ok = _split_key_value(rest) if rest else ('', '', False)
+        if ok:
+            item = {}
+            idx += 1
+            item[key], idx = _parse_value_after_key(lines, idx, item_indent, val)
+            while idx < len(lines):
+                ln2 = lines[idx]
+                if ln2['blank']:
+                    idx += 1
+                    continue
+                if ln2['indent'] < item_indent:
+                    break
+                if ln2['indent'] > item_indent:
+                    idx += 1
+                    continue
+                if ln2['content'].startswith('- ') or ln2['content'] == '-':
+                    break
+                k2, v2, ok2 = _split_key_value(ln2['content'])
+                if not ok2:
+                    idx += 1
+                    continue
+                idx += 1
+                item[k2], idx = _parse_value_after_key(lines, idx, item_indent, v2)
+            result.append(item)
+        elif rest:
+            result.append(_unquote(rest))
+            idx += 1
+        else:
+            idx += 1
+            nxt = _next_significant(lines, idx)
+            if nxt < len(lines) and lines[nxt]['indent'] > indent:
+                value, idx = _parse_block(lines, idx, lines[nxt]['indent'])
+                result.append(value)
+            else:
+                result.append(None)
+    return result, idx
+
+def yaml_load(text):
+    """Parse a YAML document and return the root mapping/sequence/scalar."""
+    lines = _tokenize(text)
+    nxt = _next_significant(lines, 0)
+    if nxt >= len(lines):
+        return None
+    value, _ = _parse_block(lines, nxt, lines[nxt]['indent'])
+    return value
+
+# ---------------------------------------------------------------------------
 
 def debug_log(enabled, message, level=0):
     """Usage: call with the `--debug` flag to emit verbose trace statements."""
@@ -54,7 +311,7 @@ def parse_workflow_file(workflow_file, debug):
     """Parse the workflow/action YAML file and return its content as a dict."""
     debug_log(debug, f"Parsing workflow file: {workflow_file}", 1)
     with open(workflow_file, "r", encoding="utf-8") as f:
-        content = yaml.load(f, Loader=yaml.BaseLoader)
+        content = yaml_load(f.read())
     debug_log(debug, f"Parsed content: {content}", 3)
     return content
 
@@ -374,59 +631,56 @@ def set_github_action_summary(summary_content):
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
       f.write(summary_content)
 
+def _env_default(dest):
+    """Look up an ``INPUT_<DEST>`` environment variable (configargparse compatible)."""
+    return os.environ.get(f"INPUT_{dest.upper()}")
+
+def _add_arg(parser, flag, dest, help_text, fallback_default=None, has_fallback=False):
+    """Register an argparse option that also reads ``INPUT_<DEST>`` from the env."""
+    env_value = _env_default(dest)
+    if env_value is not None:
+        parser.add_argument(flag, dest=dest, default=env_value, required=False, help=help_text)
+    elif has_fallback:
+        parser.add_argument(flag, dest=dest, default=fallback_default, required=False, help=help_text)
+    else:
+        parser.add_argument(flag, dest=dest, required=True, help=help_text)
+
 if __name__ == "__main__":
-    parser = configargparse.ArgParser(description=__doc__, add_env_var_help=True, auto_env_var_prefix="INPUT_")
-    parser.add_argument(
-        "--workflow-file",
-        metavar="path/to/workflow.yaml",
-        required=True,
-        dest="workflow_file",
-        help="Path to the workflow/action file (or set INPUT_WORKFLOW_FILE)",
+    parser = argparse.ArgumentParser(description=__doc__)
+    _add_arg(
+        parser, "--workflow-file", "workflow_file",
+        "Path to the workflow/action file (or set INPUT_WORKFLOW_FILE)",
     )
-    parser.add_argument(
-        "--doc-file",
-        dest="doc_file",
-        metavar="path/to/README.md",
-        required=True,
-        help="Path to the documentation file to update (or set INPUT_DOC_FILE)",
+    _add_arg(
+        parser, "--doc-file", "doc_file",
+        "Path to the documentation file to update (or set INPUT_DOC_FILE)",
     )
-    parser.add_argument(
-        "--start-token",
-        dest="start_token",
-        default="<!-- autodoc start -->",
-        required=False,
-        help="Marker indicating where autogenerated docs start",
+    _add_arg(
+        parser, "--start-token", "start_token",
+        "Marker indicating where autogenerated docs start",
+        fallback_default="<!-- autodoc start -->", has_fallback=True,
     )
-    parser.add_argument(
-        "--end-token",
-        dest="end_token",
-        default="<!-- autodoc end -->",
-        required=False,
-        help="Marker indicating where autogenerated docs end",
+    _add_arg(
+        parser, "--end-token", "end_token",
+        "Marker indicating where autogenerated docs end",
+        fallback_default="<!-- autodoc end -->", has_fallback=True,
     )
-    parser.add_argument(
-        "--table",
-        dest="table",
-        default="False",
-        required=False,
-        help="Output inputs, secrets, and outputs as markdown tables",
+    _add_arg(
+        parser, "--table", "table",
+        "Output inputs, secrets, and outputs as markdown tables",
+        fallback_default="False", has_fallback=True,
     )
-    parser.add_argument(
-        "--working-directory",
-        dest="working_directory",
-        default=None,
-        required=False,
-        help="Set the working directory for git operations",
+    _add_arg(
+        parser, "--working-directory", "working_directory",
+        "Set the working directory for git operations",
+        fallback_default=None, has_fallback=True,
     )
-    parser.add_argument(
-        "--debug",
-        dest="debug",
-        metavar="LEVEL",
-        default="0",
-        required=False,
-        help="Enable verbose logging, leve 1 to 3",
+    _add_arg(
+        parser, "--debug", "debug",
+        "Enable verbose logging, leve 1 to 3",
+        fallback_default="0", has_fallback=True,
     )
-    
+
     args = parser.parse_args()
 
     if args.debug == False or args.debug.lower() == "false":
