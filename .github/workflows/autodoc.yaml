@@ -8,7 +8,7 @@ permissions:
 jobs:
   autodoc:
     name: Auto-generated workflow documentation
-    uses: nrkno/github-workflow-action-workflow-autodoc/.github/workflows/workflow.yaml@v1
+    uses: nrkno/github-workflow-action-workflow-autodoc/.github/workflows/workflow.yaml@84a54022b61e892fcc09d945795771d2d3822ad7 # v1
     with:
       runs-on: ubuntu-latest
       workflow_file: .github/workflows/workflow.yaml
