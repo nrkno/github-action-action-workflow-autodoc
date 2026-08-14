@@ -42,7 +42,9 @@
     {
       "customType": "regex",
       "description": "update image",
-      "fileMatch": ["(^|/).*\\.tf$"],
+      "managerFilePatterns": [
+        "/(^|/).*\\.tf$/"
+      ],
       "matchStrings": [
         "\\s*image\\s*=\\s*\"(?<depName>.*?):(?<currentValue>.*?)\"\\s*#\\s*renovate docker\\n"
       ],
