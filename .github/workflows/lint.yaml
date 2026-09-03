@@ -3,7 +3,7 @@ on:
 
 jobs:
   commitlint:
-    uses: nrkno/github-workflow-semantic-release/.github/workflows/workflow.yaml@2a544544e6e6dda63243f5c75d88bbc2b0368402 # v5.1.4
+    uses: nrkno/github-workflow-semantic-release/.github/workflows/workflow.yaml@6a8585e39eabcb53cdbdebfcc76eb9672199089e # v5.1.5
     with:
       runs-on: ubuntu-latest
       release-enabled: false
