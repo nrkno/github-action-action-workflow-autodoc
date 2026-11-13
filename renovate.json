@@ -9,6 +9,27 @@
   ],
   "timezone": "Europe/Oslo",
   "minimumReleaseAge": "14 days", // https://docs.renovatebot.com/upgrade-best-practices/#wait-two-weeks-before-automerging-third-party-dependencies
+  "labels": ["dependencies"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "update image",
+      "managerFilePatterns": [
+        "/(^|/).*\\.tf$/"
+      ],
+      "matchStrings": [
+        "\\s*image\\s*=\\s*\"(?<depName>.*?):(?<currentValue>.*?)\"\\s*#\\s*renovate docker\\n"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "schedule": ["after 8am and before 4pm every weekday"],
+  "hostRules": [
+    {
+      "matchHost": "terraform-registry.nrk.cloud",
+      "token": "{{ secrets.TF_REGISTRY }}"
+    }
+  ],
   "packageRules": [
     {
       // https://docs.renovatebot.com/key-concepts/minimum-release-age/#which-registries-support-release-timestamps
@@ -35,41 +56,16 @@
         "⚠️ Release timestamp support is not available for this update type, timestamp is set to optional for this update."
       ],
       "minimumReleaseAgeBehavior": "timestamp-optional"
-    }
-  ],
-  "labels": ["dependencies"],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "description": "update image",
-      "managerFilePatterns": [
-        "/(^|/).*\\.tf$/"
-      ],
-      "matchStrings": [
-        "\\s*image\\s*=\\s*\"(?<depName>.*?):(?<currentValue>.*?)\"\\s*#\\s*renovate docker\\n"
-      ],
-      "datasourceTemplate": "docker"
-    }
-  ],
-  "schedule": ["after 8am and before 4pm every weekday"],
-  "hostRules": [
-    {
-      "matchHost": "terraform-registry.nrk.cloud",
-      "token": "{{ secrets.TF_REGISTRY }}"
-    }
-  ],
-  "packageRules": [
+    },
     {
       "matchUpdateTypes": ["digest", "pin", "pinDigest", "replacement"],
       "addLabels": ["digest"]
     },
     {
-      "matchPackageNames": ["github-actions"],
-      "matchDatasources": ["github-tags"],
-      "matchFileNames": ["\\.github\\/workflows\\/.*"],
-      "commitMessagePrefix": "ci(no-release): ",
-      "commitMessageAction": "bump",
-      "commitMessageTopic": "{{depName}} from {{currentVersion}} to {{newVersion}}"
+      "description": "Action bumps change what consumers execute, so they must release a patch (fix) and be visible in the release notes.",
+      "matchManagers": ["github-actions"],
+      "commitMessagePrefix": "fix(deps):",
+      "semanticCommits": "disabled"
     },
     {
       "matchUpdateTypes": ["patch"],
