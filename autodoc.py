@@ -503,22 +503,41 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
     on:
       pull_request:
 
+    # Nothing by default; each job asks for what it needs.
+    permissions: {{}}
+
     jobs:
-      example-job:
-        name: Example Job
+      autodoc:
+        runs-on: ubuntu-latest
+        # This job runs a container action, so it gets no write token.
+        permissions:
+          contents: read
         steps:
           - uses: actions/checkout@v7.0.1
             with:
-              ref: ${{{{ github.head_ref }}}}
+              ref: ${{{{ github.event.pull_request.head.sha }}}}
               persist-credentials: false
 
           - name: example-step
             uses: {repo}@{branch}
-            with:
-    {inputs_section}
+    {with_section}
 
-          # Commit the changed file in a separate git-only step that alone
-          # receives a token. Never hand write credentials to this action.
+          - uses: actions/upload-artifact@v7.0.2
+            with:
+              name: documentation
+              path: README.md
+              if-no-files-found: error
+
+      # Commit the result in a SEPARATE job (never the one above): a container
+      # action can write GITHUB_ENV and .git/config, and would then control
+      # every later step, including one that holds a write token.
+      #
+      # That job needs `permissions: contents: write`, a fresh checkout with
+      # `persist-credentials: false`, and then: download the artifact, check
+      # that it is exactly one regular file, copy it over the documented file,
+      # commit, and push with the token given only to that last git command.
+      # nrkno/github-workflow-action-workflow-autodoc does all of this; prefer
+      # calling it over copying the steps.
     ```
     """)
     inputs_section = ""
@@ -537,10 +556,11 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
     for output_name in outputs:
         outputs_section += f"          {output_name}: ${{{{ steps.example_step.outputs.{output_name} }}}}\n"
     
+    with_section = f"        with:\n{inputs_section.rstrip()}\n" if inputs_section.strip() else ""
     docstring = example_template_jinja.format(
         repo=repo,
         branch=branch,
-        inputs_section=inputs_section.rstrip(),
+        with_section=with_section.rstrip("\n"),
         secrets_section=secrets_section.rstrip(),
         outputs_section=outputs_section.rstrip(),
         full="Full example usage" if full else "Simple example usage"
@@ -561,10 +581,11 @@ def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secr
 
     jobs:
       example-job:
+        # The called workflow pushes the result, so the job must grant this.
+        permissions:
+          contents: write
         # Reusable workflows are called at job level. Pin to a full commit SHA.
-        uses: {repo}/{workflow_file}@<full-commit-sha> # vX.Y.Z{secrets_section}
-        with:
-    {inputs_section}
+        uses: {repo}/{workflow_file}@<full-commit-sha> # vX.Y.Z{with_section}{secrets_section}
     ```
     """)
     inputs_section = ""
@@ -582,11 +603,12 @@ def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secr
       for secret_name in secrets:
           secrets_section += f"      {secret_name}: '${{{{ secrets.{secret_name} }}}}'\n"
     
+    with_section = f"\n    with:\n{inputs_section.rstrip()}" if inputs_section.strip() else ""
     docstring = example_template_jinja.format(
         repo=repo,
         branch=branch,
         workflow_file=workflow_file,
-        inputs_section=inputs_section.rstrip(),
+        with_section=with_section,
         secrets_section=secrets_section.rstrip(),
         full="Full example usage" if full else "Simple example usage"
     )
