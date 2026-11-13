@@ -5,9 +5,9 @@
   ],
   "packageRules": [
     {
-      "description": "Action bumps change what consumers execute, so they must release a patch (fix) and be visible in the release notes.",
+      "description": "Workflow action bumps only touch this repository's CI. This is a Docker action, so consumers run no step action from here; do not release for them (ci, not fix).",
       "matchManagers": ["github-actions"],
-      "commitMessagePrefix": "fix(deps):",
+      "commitMessagePrefix": "ci(deps):",
       "semanticCommits": "disabled"
     },
     {
