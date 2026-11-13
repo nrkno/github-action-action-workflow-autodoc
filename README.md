@@ -3,7 +3,7 @@
 A custom Github Action that can be used to automaticly populate docs from action/workflow definitions.
 
 <!-- start -->
-## autodoc
+## Github action - Autodoc
 Update readme with workflow and action docs.
 
 ### Required Inputs
@@ -20,7 +20,6 @@ Update readme with workflow and action docs.
 |**start_token**|Token marking the start of the autodoc section<br>default value: <!-- autodoc start --><br>|string|`<!-- autodoc start -->`|
 |**end_token**|Token marking the end of the autodoc section|string|`<!-- autodoc end -->`|
 |**table**|Format inputs as a markdown table|string|`true`|
-|**github-output**|Print documented inputs, secrets, and outputs to GitHub Action outputs|string|`false`|
 |**debug**|Print debug messages. 0=none, 1=some, 2=more, 3=all|string|`0`|
 
 
@@ -28,6 +27,7 @@ Update readme with workflow and action docs.
 
 |Output name|Description|
 |---|---|
+|file_type|The type automaticly detected by the script of the input_file documented: workflow or action|
 |autodoc_out|If enabled, the generated documentation for inputs, secrets, and outputs|
 
 ### Simple example usage
@@ -42,13 +42,19 @@ jobs:
   example-job:
     name: Example Job
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: false
 
       - name: example-step
-        uses: nrkno/github-action-action-workflow-autodoc@v1
+        uses: nrkno/github-action-action-workflow-autodoc@v2
         with:
           workflow_file: .github/workflows/plan.yaml
           doc_file: README.md
+
+      # Commit the changed file in a separate git-only step that alone
+      # receives a token. Never hand write credentials to this action.
 ```
 
 ### Full example usage
@@ -63,18 +69,23 @@ jobs:
   example-job:
     name: Example Job
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: false
 
       - name: example-step
-        uses: nrkno/github-action-action-workflow-autodoc@v1
+        uses: nrkno/github-action-action-workflow-autodoc@v2
         with:
           workflow_file: .github/workflows/plan.yaml
           doc_file: README.md
           start_token: <!-- autodoc start --> # Optional
           end_token: <!-- autodoc end --> # Optional
           table: true # Optional
-          github-output: false # Optional
           debug: 0 # Optional
+
+      # Commit the changed file in a separate git-only step that alone
+      # receives a token. Never hand write credentials to this action.
 ```
 
 
@@ -104,6 +115,15 @@ Keep them pinned to a full commit SHA with a `# vX.Y.Z` comment.
 The `Actions lockfile` workflow runs `gh actions-lock --verify-local` on PRs that
 touch `.github/workflows/` and fails if an action reference has no lockfile
 entry. Do not edit the lockfile by hand.
+
+## Releases and the image
+
+`action.yaml` builds the action image from the `Dockerfile` at the action ref, so
+a pinned ref (tag or SHA) always runs exactly the code at that ref, on a
+digest-pinned `python` base image. No image is published to a registry. The
+release job only creates tags and a GitHub release, with a lockfile-pinned
+toolchain (`npm ci --ignore-scripts`). `fix(deps)` commits (Renovate action and
+base-image bumps) release a patch.
 
 ## Contributing
 
