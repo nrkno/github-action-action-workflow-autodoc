@@ -121,8 +121,9 @@ entry. Do not edit the lockfile by hand.
 `action.yaml` builds the action image from the `Dockerfile` at the action ref, so
 a pinned ref (tag or SHA) always runs exactly the code at that ref, on a
 digest-pinned `python` base image. No image is published to a registry. The
-release job only creates tags and a GitHub release, with a lockfile-pinned
-toolchain (`npm ci --ignore-scripts`). `fix(deps)` commits (Renovate action and
+release job only creates the exact tag and a GitHub release, with a
+lockfile-pinned toolchain (`npm ci --ignore-scripts`). A separate `alias-tags`
+job (`contents: write` only) then moves `v<major>` and `v<major>.<minor>`. `fix(deps)` commits (Renovate action and
 base-image bumps) release a patch.
 
 ## Contributing

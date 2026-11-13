@@ -20,6 +20,8 @@ permissions: {}
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.semantic-release.outputs.tag }}
     permissions:
       contents: write
       issues: write
@@ -38,6 +40,75 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run Semantic Release
+        id: semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        run: |
+          npx semantic-release
+          # semantic-release tags HEAD only when it publishes. Expose that tag
+          # (empty when nothing was released) for the alias-tags job.
+          tag=""
+          while IFS= read -r t
+          do
+            if [[ "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            then
+              tag="$t"
+            fi
+          done < <(git tag --points-at HEAD)
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  # semantic-release only creates the exact tag (v2.3.4). Consumers use the
+  # floating tags v2 and v2.3, so move them to each new release. Separate job:
+  # it needs no checkout, no npm toolchain and no issue or PR scopes.
+  alias-tags:
+    name: Move floating alias tags
+    needs: release
+    if: needs.release.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Move vMAJOR and vMAJOR.MINOR
+        env:
+          # Passed through env, never interpolated into the script.
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Accept only a plain release tag. Anything else (pre-releases, odd
+          # characters, path tricks) is rejected before any API call.
+          if [[ ! "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
+          then
+            echo "::error::Refusing to move alias tags for unexpected tag name"
+            exit 1
+          fi
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+
+          sha="$(gh api "repos/${REPO}/commits/${RELEASE_TAG}" --jq .sha)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]
+          then
+            echo "::error::Could not resolve ${RELEASE_TAG} to a commit"
+            exit 1
+          fi
+
+          move_tag() {
+            local name="$1" err
+            if err="$(gh api "repos/${REPO}/git/ref/tags/${name}" 2>&1 >/dev/null)"
+            then
+              gh api --method PATCH "repos/${REPO}/git/refs/tags/${name}" \
+                -f sha="$sha" -F force=true >/dev/null
+              echo "Moved ${name} to ${sha}"
+            elif [[ "$err" == *"HTTP 404"* ]]
+            then
+              gh api --method POST "repos/${REPO}/git/refs" \
+                -f ref="refs/tags/${name}" -f sha="$sha" >/dev/null
+              echo "Created ${name} at ${sha}"
+            else
+              echo "::error::Could not look up ${name}: ${err}"
+              exit 1
+            fi
+          }
+
+          move_tag "v${major}"
+          move_tag "v${major}.${minor}"
