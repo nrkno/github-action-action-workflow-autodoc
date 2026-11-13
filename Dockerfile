@@ -1,10 +1,12 @@
-FROM python:3.14-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b728874824e6c0a27cb96fc
+# Built from this file at the action ref (see action.yaml), so the image always
+# matches the ref a consumer pins. The script only uses the standard library,
+# so no packages are installed: nothing to pin, and no extra CVE surface.
+FROM python:3.14-alpine@sha256:5862d971d1f0ae26b258cefa4e893556b1d3aba81bd2ff30888704ad378bab67
 
-RUN apk --no-cache add coreutils util-linux-misc git bash
-
-COPY autodoc.py /autodoc.py 
-COPY entrypoint.sh /entrypoint.sh
+COPY autodoc.py /autodoc.py
 
 WORKDIR /github/workspace/
 
-ENTRYPOINT ["/entrypoint.sh"]
+# -I (isolated mode): ignore PYTHON* variables and never put the working
+# directory, which holds the PR's files, on sys.path.
+ENTRYPOINT ["python3", "-I", "/autodoc.py"]
