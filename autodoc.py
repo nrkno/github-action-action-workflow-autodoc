@@ -507,20 +507,18 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
       example-job:
         name: Example Job
         steps:
-          - uses: actions/checkout@v6
+          - uses: actions/checkout@v7.0.1
             with:
-              ref: ${{ github.head_ref }}
-              persist-credentials: true
+              ref: ${{{{ github.head_ref }}}}
+              persist-credentials: false
 
           - name: example-step
             uses: {repo}@{branch}
             with:
     {inputs_section}
-    
-          - name: Commit and push changes
-            uses: stefanzweifel/git-auto-commit-action@v7
-            with:
-              commit_message: "docs(autodoc): update documentation"
+
+          # Commit the changed file in a separate git-only step that alone
+          # receives a token. Never hand write credentials to this action.
     ```
     """)
     inputs_section = ""
@@ -553,7 +551,7 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
 def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secrets, outputs, full, debug):
     """Create a Markdown docstring for examples."""
     example_template_jinja = textwrap.dedent("""\
-    ### {full} (using steps 'uses' syntax)
+    ### {full} (job-level 'uses' syntax)
     
     ```yaml
     ---
@@ -563,28 +561,26 @@ def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secr
 
     jobs:
       example-job:
-        steps:
-          - name: example job
-            id: example_step
-            uses: {repo}/{workflow_file}@main{secrets_section}
-            with:
+        # Reusable workflows are called at job level. Pin to a full commit SHA.
+        uses: {repo}/{workflow_file}@<full-commit-sha> # vX.Y.Z{secrets_section}
+        with:
     {inputs_section}
     ```
     """)
     inputs_section = ""
     for input_name, input_opts in inputs["inputs_required"].items():
-        inputs_section += f"          {input_name}: '{input_opts.get('default', '<value>')}'\n"
+        inputs_section += f"      {input_name}: '{input_opts.get('default', '<value>')}'\n"
 
     if full:
       for input_name, input_opts in inputs["inputs"].items():
-          inputs_section += f"          {input_name}: '{input_opts.get('default', '<value>')}'\n"
+          inputs_section += f"      {input_name}: '{input_opts.get('default', '<value>')}'\n"
     
     
     secrets_section = ""
     if full and len(secrets) > 0:
-      secrets_section = "\n        secrets:\n"
+      secrets_section = "\n    secrets:\n"
       for secret_name in secrets:
-          secrets_section += f"          {secret_name}: '${{{{ secrets.{secret_name} }}}}'\n"
+          secrets_section += f"      {secret_name}: '${{{{ secrets.{secret_name} }}}}'\n"
     
     docstring = example_template_jinja.format(
         repo=repo,
@@ -615,11 +611,11 @@ def input_text_to_bool(input_text):
 def set_github_output(name, value, file_type):
     """Sets a multiline GitHub Action output variable using a unique delimiter."""
     with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-        delimiter = uuid.uuid1()
+        delimiter = f'ghadelimiter_{uuid.uuid4().hex}'
         print(f'{name}<<{delimiter}', file=fh)
         print(value, file=fh)
         print(delimiter, file=fh)
-        print(f'input_type={file_type}', file=fh)
+        print(f'file_type={file_type}', file=fh)
 
 def add_to_summary(message):
     """Adds a message to the GitHub Action summary (not implemented)."""
