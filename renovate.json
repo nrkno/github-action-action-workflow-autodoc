@@ -38,7 +38,7 @@
       "prBodyNotes": [
         "⚠️ Release timestamp support for Docker is only supported on Docker Hub, timestamp is set to optional for this update."
       ],
-      "minimumReleaseAgeBehavior": "timestamp-optional",
+      "minimumReleaseAgeBehaviour": "timestamp-optional",
       // Docker updates are updating the tag which happens quite frequently, and often a new release is made before
       // our 14 day window, causing us to not get docker updates. Setting a lower threshold for docker to get more updates.
       "minimumReleaseAge": "7 days"
@@ -55,7 +55,7 @@
       "prBodyNotes": [
         "⚠️ Release timestamp support is not available for this update type, timestamp is set to optional for this update."
       ],
-      "minimumReleaseAgeBehavior": "timestamp-optional"
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
       "matchUpdateTypes": ["digest", "pin", "pinDigest", "replacement"],
@@ -78,6 +78,18 @@
     {
       "matchUpdateTypes": ["major"],
       "addLabels": ["major"]
+    },
+    {
+      "description": "Step-level actions keep full semver tags: .github/workflows/actions.lock records and enforces the SHAs, so Renovate must not pin digests here (overrides the preset's pinGitHubActionDigests).",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action"],
+      "pinDigests": false
+    },
+    {
+      "description": "Reusable workflow calls (jobs.<job_id>.uses) are not covered by the lockfile: keep them pinned to a full commit SHA with a version comment.",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["workflow"],
+      "pinDigests": true
     }
   ],
   "gitIgnoredAuthors": ["terraform-consumer[bot]", "bulldozer[bot]"]
