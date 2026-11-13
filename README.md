@@ -38,13 +38,19 @@ name: Example Workflow using this Action
 on:
   pull_request:
 
+# Nothing by default; each job asks for what it needs.
+permissions: {}
+
 jobs:
-  example-job:
-    name: Example Job
+  autodoc:
+    runs-on: ubuntu-latest
+    # This job runs a container action, so it gets no write token.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
       - name: example-step
@@ -53,8 +59,22 @@ jobs:
           workflow_file: .github/workflows/plan.yaml
           doc_file: README.md
 
-      # Commit the changed file in a separate git-only step that alone
-      # receives a token. Never hand write credentials to this action.
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: documentation
+          path: README.md
+          if-no-files-found: error
+
+  # Commit the result in a SEPARATE job (never the one above): a container
+  # action can write GITHUB_ENV and .git/config, and would then control
+  # every later step, including one that holds a write token.
+  #
+  # That job needs `permissions: contents: write`, a fresh checkout with
+  # `persist-credentials: false`, and then: download the artifact, check
+  # that it is exactly one regular file, copy it over the documented file,
+  # commit, and push with the token given only to that last git command.
+  # nrkno/github-workflow-action-workflow-autodoc does all of this; prefer
+  # calling it over copying the steps.
 ```
 
 ### Full example usage
@@ -65,13 +85,19 @@ name: Example Workflow using this Action
 on:
   pull_request:
 
+# Nothing by default; each job asks for what it needs.
+permissions: {}
+
 jobs:
-  example-job:
-    name: Example Job
+  autodoc:
+    runs-on: ubuntu-latest
+    # This job runs a container action, so it gets no write token.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
       - name: example-step
@@ -84,8 +110,22 @@ jobs:
           table: true # Optional
           debug: 0 # Optional
 
-      # Commit the changed file in a separate git-only step that alone
-      # receives a token. Never hand write credentials to this action.
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: documentation
+          path: README.md
+          if-no-files-found: error
+
+  # Commit the result in a SEPARATE job (never the one above): a container
+  # action can write GITHUB_ENV and .git/config, and would then control
+  # every later step, including one that holds a write token.
+  #
+  # That job needs `permissions: contents: write`, a fresh checkout with
+  # `persist-credentials: false`, and then: download the artifact, check
+  # that it is exactly one regular file, copy it over the documented file,
+  # commit, and push with the token given only to that last git command.
+  # nrkno/github-workflow-action-workflow-autodoc does all of this; prefer
+  # calling it over copying the steps.
 ```
 
 
@@ -123,8 +163,9 @@ a pinned ref (tag or SHA) always runs exactly the code at that ref, on a
 digest-pinned `python` base image. No image is published to a registry. The
 release job only creates the exact tag and a GitHub release, with a
 lockfile-pinned toolchain (`npm ci --ignore-scripts`). A separate `alias-tags`
-job (`contents: write` only) then moves `v<major>` and `v<major>.<minor>`. `fix(deps)` commits (Renovate action and
-base-image bumps) release a patch.
+job (`contents: write` only) then moves `v<major>` and `v<major>.<minor>`. `fix(deps)` commits (Renovate base-image bumps) release a patch. Bumps of the
+actions used by this repository's own workflows are `ci(deps)` and do not release,
+because consumers run no step action from here.
 
 ## Contributing
 
