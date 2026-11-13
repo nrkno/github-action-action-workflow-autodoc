@@ -2,16 +2,20 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: write
+# The default token is read-only; the job below opts in to what it needs.
+permissions: {}
 
 jobs:
   autodoc:
-    name: Auto-generated workflow documentation
+    name: Auto-generated action documentation
+    permissions:
+      contents: write
+    # TODO(bump): move to the workflow release that carries the credential split
+    # and plain `runs-on` support. The pinned v1.1.4 still needs the JSON-quoted form below.
     uses: nrkno/github-workflow-action-workflow-autodoc/.github/workflows/workflow.yaml@84a54022b61e892fcc09d945795771d2d3822ad7 # v1.1.4
     with:
-      runs-on: ubuntu-latest
-      workflow_file: .github/workflows/workflow.yaml
+      runs-on: '"ubuntu-latest"'
+      workflow_file: action.yaml
       doc_file: README.md
       start_token: "<!-- start -->"
       end_token: "<!-- end -->"
