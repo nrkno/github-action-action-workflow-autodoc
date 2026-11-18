@@ -1,0 +1,24 @@
+name: Example reusable workflow
+on:
+  workflow_call:
+    inputs:
+      greeting:
+        description: Greeting to print
+        type: string
+        required: true
+    secrets:
+      example_token:
+        description: Example token described in the docs
+        required: false
+    outputs:
+      message:
+        description: The printed greeting
+        value: ${{ jobs.greet.outputs.message }}
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    outputs:
+      message: ${{ steps.greet.outputs.message }}
+    steps:
+      - id: greet
+        run: echo 'message=Hello' >> "$GITHUB_OUTPUT"

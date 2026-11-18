@@ -1,5 +1,6 @@
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 # The default token is read-only; the job below opts in to what it needs.
@@ -12,9 +13,8 @@ jobs:
       contents: write
     # Off until the bump below. The called workflow still runs action v2.2.0,
     # which renders the old README templates, so running it here would commit a
-    # revert of the regenerated README on every PR. Set the repository variable
-    # AUTODOC_SELFTEST to `true` to run it anyway.
-    # TODO(bump): delete this `if:` together with the bump below.
+    # revert of the regenerated README. Leave AUTODOC_SELFTEST off until the bump.
+    # TODO(bump): remove the opt-in condition only; keep skipping draft PRs.
     if: vars.AUTODOC_SELFTEST == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     # TODO(bump): move to the workflow release that carries the credential split
     # and plain `runs-on` support. The pinned v1.1.4 still needs the JSON-quoted form below.

@@ -54,7 +54,8 @@ jobs:
           persist-credentials: false
 
       - name: example-step
-        uses: nrkno/github-action-action-workflow-autodoc@v2
+        # Replace vX.Y.Z with an actual released version tag before running.
+        uses: nrkno/github-action-action-workflow-autodoc@vX.Y.Z
         with:
           workflow_file: .github/workflows/plan.yaml
           doc_file: README.md
@@ -73,8 +74,7 @@ jobs:
   # `persist-credentials: false`, and then: download the artifact, check
   # that it is exactly one regular file, copy it over the documented file,
   # commit, and push with the token given only to that last git command.
-  # nrkno/github-workflow-action-workflow-autodoc does all of this; prefer
-  # calling it over copying the steps.
+  # Prefer a reusable workflow that uses separate jobs over copying these steps.
 ```
 
 ### Full example usage
@@ -101,7 +101,8 @@ jobs:
           persist-credentials: false
 
       - name: example-step
-        uses: nrkno/github-action-action-workflow-autodoc@v2
+        # Replace vX.Y.Z with an actual released version tag before running.
+        uses: nrkno/github-action-action-workflow-autodoc@vX.Y.Z
         with:
           workflow_file: .github/workflows/plan.yaml
           doc_file: README.md
@@ -124,8 +125,7 @@ jobs:
   # `persist-credentials: false`, and then: download the artifact, check
   # that it is exactly one regular file, copy it over the documented file,
   # commit, and push with the token given only to that last git command.
-  # nrkno/github-workflow-action-workflow-autodoc does all of this; prefer
-  # calling it over copying the steps.
+  # Prefer a reusable workflow that uses separate jobs over copying these steps.
 ```
 
 
@@ -166,6 +166,16 @@ lockfile-pinned toolchain (`npm ci --ignore-scripts`). A separate `alias-tags`
 job (`contents: write` only) then moves `v<major>` and `v<major>.<minor>`. `fix(deps)` commits (Renovate base-image bumps) release a patch. Bumps of the
 actions used by this repository's own workflows are `ci(deps)` and do not release,
 because consumers run no step action from here.
+
+## CI tests
+
+The `Test` workflow checks release-note generation with the locked dependencies
+and runs the checked-out Docker action against disposable documentation for an
+action and a reusable workflow. It does not push, release, or publish anything.
+The separate write-capable `autodoc.yaml` integration stays off unless
+`AUTODOC_SELFTEST` is `true`; its pull-request job skips drafts. The pinned
+workflow still uses the old templates. Leave the opt-in off until a release of
+the reusable workflow includes the credential split and updated generator.
 
 ## Contributing
 

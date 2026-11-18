@@ -5,6 +5,7 @@ module.exports = {
     [
       "@semantic-release/release-notes-generator",
       {
+        // Preset v10 requires changelog writer v9; this plugin uses writer v8.
         preset: "conventionalcommits",
         writerOpts: {
           commitPartial: `* {{header}}

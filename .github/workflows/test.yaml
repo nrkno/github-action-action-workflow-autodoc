@@ -1,0 +1,91 @@
+name: Test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: "lts/*"
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate release notes without publishing
+        run: node --test tests/release-notes.test.cjs
+
+  docker-action:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare disposable docs
+        id: fixtures
+        run: |
+          dir=$(mktemp -d .autodoc-test.XXXXXX)
+          printf 'dir=%s\n' "$dir" >> "$GITHUB_OUTPUT"
+          awk '
+            /^<!-- start -->$/ { print; skip=1; next }
+            /^<!-- end -->$/ { skip=0 }
+            !skip
+          ' README.md > "$dir/action.md"
+          printf '# Fixture\n<!-- autodoc start -->\n<!-- autodoc end -->\n' > "$dir/workflow.md"
+      - name: Document the checked-out action
+        id: action
+        uses: ./
+        with:
+          workflow_file: action.yaml
+          doc_file: ${{ steps.fixtures.outputs.dir }}/action.md
+          start_token: "<!-- start -->"
+          end_token: "<!-- end -->"
+      - name: Document a reusable workflow
+        id: workflow
+        uses: ./
+        with:
+          workflow_file: tests/fixtures/reusable-workflow.yaml
+          doc_file: ${{ steps.fixtures.outputs.dir }}/workflow.md
+      - name: Check generated files and action outputs
+        env:
+          TEST_DIR: ${{ steps.fixtures.outputs.dir }}
+          ACTION_TYPE: ${{ steps.action.outputs.file_type }}
+          ACTION_DOC: ${{ steps.action.outputs.autodoc_out }}
+          WORKFLOW_TYPE: ${{ steps.workflow.outputs.file_type }}
+          WORKFLOW_DOC: ${{ steps.workflow.outputs.autodoc_out }}
+        run: |
+          cmp -- README.md "$TEST_DIR/action.md"
+          test "$ACTION_TYPE" = action
+          grep -Fx '## Github action - Autodoc' <<< "$ACTION_DOC"
+          grep -Fx "        uses: ${GITHUB_REPOSITORY}@vX.Y.Z" <<< "$ACTION_DOC"
+          test "$WORKFLOW_TYPE" = workflow
+          for line in \
+            '## Example reusable workflow' \
+            "|**greeting**|Greeting to print|string|\`unknown\`|" \
+            '|**example_token**|Example token described in the docs|unknown|' \
+            '|message|The printed greeting|' \
+            "    uses: ${GITHUB_REPOSITORY}/tests/fixtures/reusable-workflow.yaml@<full-commit-sha> # vX.Y.Z"
+          do
+            grep -Fx -- "$line" <<< "$WORKFLOW_DOC"
+            grep -Fx -- "$line" "$TEST_DIR/workflow.md"
+          done
+          grep -Fx '# Fixture' "$TEST_DIR/workflow.md"
+      - name: Remove disposable docs
+        if: always() && steps.fixtures.outputs.dir != ''
+        env:
+          TEST_DIR: ${{ steps.fixtures.outputs.dir }}
+        run: |
+          rm -f -- "$TEST_DIR/action.md" "$TEST_DIR/workflow.md"
+          rmdir -- "$TEST_DIR"

@@ -492,7 +492,7 @@ def create_outputs_docstring(outputs, table, debug):
     debug_log(debug, f"Created outputs docstring: \n{docstring}", 3)
     return docstring
 
-def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, full, debug):
+def create_action_examples_docstring(repo, inputs, secrets, outputs, full, debug):
     """Create a Markdown docstring for examples."""
     example_template_jinja = textwrap.dedent("""\
     ### {full}
@@ -519,7 +519,8 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
               persist-credentials: false
 
           - name: example-step
-            uses: {repo}@{branch}
+            # Replace vX.Y.Z with an actual released version tag before running.
+            uses: {repo}@vX.Y.Z
     {with_section}
 
           - uses: actions/upload-artifact@v7.0.2
@@ -536,8 +537,7 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
       # `persist-credentials: false`, and then: download the artifact, check
       # that it is exactly one regular file, copy it over the documented file,
       # commit, and push with the token given only to that last git command.
-      # nrkno/github-workflow-action-workflow-autodoc does all of this; prefer
-      # calling it over copying the steps.
+      # Prefer a reusable workflow that uses separate jobs over copying these steps.
     ```
     """)
     inputs_section = ""
@@ -559,7 +559,6 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
     with_section = f"        with:\n{inputs_section.rstrip()}\n" if inputs_section.strip() else ""
     docstring = example_template_jinja.format(
         repo=repo,
-        branch=branch,
         with_section=with_section.rstrip("\n"),
         secrets_section=secrets_section.rstrip(),
         outputs_section=outputs_section.rstrip(),
@@ -568,7 +567,7 @@ def create_action_examples_docstring(repo, branch, inputs, secrets, outputs, ful
     debug_log(debug, f"Created examples docstring: \n{docstring}", 3)
     return docstring
 
-def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secrets, outputs, full, debug):
+def create_workflow_examples_docstring(repo, workflow_file, inputs, secrets, outputs, full, debug):
     """Create a Markdown docstring for examples."""
     example_template_jinja = textwrap.dedent("""\
     ### {full} (job-level 'uses' syntax)
@@ -606,7 +605,6 @@ def create_workflow_examples_docstring(repo, workflow_file, branch, inputs, secr
     with_section = f"\n    with:\n{inputs_section.rstrip()}" if inputs_section.strip() else ""
     docstring = example_template_jinja.format(
         repo=repo,
-        branch=branch,
         workflow_file=workflow_file,
         with_section=with_section,
         secrets_section=secrets_section.rstrip(),
@@ -770,16 +768,16 @@ if __name__ == "__main__":
             inputs = action_get_inputs(workflow_content, args.debug)
             secrets = action_get_secrets(workflow_content, args.debug)
             outputs = action_get_outputs(workflow_content, args.debug)
-            full_example_docstring = create_action_examples_docstring(github_repo, "v2", inputs, secrets, outputs, True, args.debug)
-            simple_example_docstring = create_action_examples_docstring(github_repo, "v2", inputs, secrets, outputs, False, args.debug)
+            full_example_docstring = create_action_examples_docstring(github_repo, inputs, secrets, outputs, True, args.debug)
+            simple_example_docstring = create_action_examples_docstring(github_repo, inputs, secrets, outputs, False, args.debug)
         case "workflow":
             name = workflow_content.get("name", "")
             description = workflow_content.get("description", "")
             inputs = workflow_get_inputs(workflow_content, args.debug)
             secrets = workflow_get_secrets(workflow_content, args.debug)
             outputs = workflow_get_outputs(workflow_content, args.debug)
-            full_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, "v2", inputs, secrets, outputs, True, args.debug)
-            simple_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, "v2", inputs, secrets, outputs, False, args.debug)
+            full_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, inputs, secrets, outputs, True, args.debug)
+            simple_example_docstring = create_workflow_examples_docstring(github_repo, args.workflow_file, inputs, secrets, outputs, False, args.debug)
         case _:
             print(f"[ERROR] Unable to determine if file is a GitHub Action or reusable workflow: {args.workflow_file}")
             sys.exit(1)
