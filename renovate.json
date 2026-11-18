@@ -1,88 +1,32 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:best-practices", // https://docs.renovatebot.com/upgrade-best-practices/#use-the-configbest-practices-preset
-    "mergeConfidence:all-badges"
-  ],
-  "ignorePresets": [
-    "security:minimumReleaseAgeNpm" // without this, our minimumReleaseAge of 14 days will be overridden
-  ],
-  "timezone": "Europe/Oslo",
-  "minimumReleaseAge": "14 days", // https://docs.renovatebot.com/upgrade-best-practices/#wait-two-weeks-before-automerging-third-party-dependencies
-  "packageRules": [
-    {
-      // https://docs.renovatebot.com/key-concepts/minimum-release-age/#which-registries-support-release-timestamps
-      "matchDatasources": ["docker"],
-      "description": "Docker updates from other registries than Docker Hub does not support release timestamps.",
-      "prBodyNotes": [
-        "⚠️ Release timestamp support for Docker is only supported on Docker Hub, timestamp is set to optional for this update."
-      ],
-      "minimumReleaseAgeBehavior": "timestamp-optional",
-      // Docker updates are updating the tag which happens quite frequently, and often a new release is made before
-      // our 14 day window, causing us to not get docker updates. Setting a lower threshold for docker to get more updates.
-      "minimumReleaseAge": "7 days"
-    },
-    {
-      // https://docs.renovatebot.com/key-concepts/minimum-release-age/#which-update-types-take-minimumreleaseage-into-account
-      "description": "Lockfile, digest, pin and replacement updates does not support release timestamps.",
-      "matchUpdateTypes": [
-        "lockFileMaintenance",
-        "digest",
-        "pin",
-        "replacement"
-      ],
-      "prBodyNotes": [
-        "⚠️ Release timestamp support is not available for this update type, timestamp is set to optional for this update."
-      ],
-      "minimumReleaseAgeBehavior": "timestamp-optional"
-    }
-  ],
-  "labels": ["dependencies"],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "description": "update image",
-      "managerFilePatterns": [
-        "/(^|/).*\\.tf$/"
-      ],
-      "matchStrings": [
-        "\\s*image\\s*=\\s*\"(?<depName>.*?):(?<currentValue>.*?)\"\\s*#\\s*renovate docker\\n"
-      ],
-      "datasourceTemplate": "docker"
-    }
-  ],
-  "schedule": ["after 8am and before 4pm every weekday"],
-  "hostRules": [
-    {
-      "matchHost": "terraform-registry.nrk.cloud",
-      "token": "{{ secrets.TF_REGISTRY }}"
-    }
+    "local>nrkno/nrk-bot-configs//plattform/utvikleropplevelse/renovate/renovate"
   ],
   "packageRules": [
     {
-      "matchUpdateTypes": ["digest", "pin", "pinDigest", "replacement"],
-      "addLabels": ["digest"]
+      "description": "Workflow action bumps only touch this repository's CI. This is a Docker action, so consumers run no step action from here; do not release for them (ci, not fix).",
+      "matchManagers": ["github-actions"],
+      "commitMessagePrefix": "ci(deps):",
+      "semanticCommits": "disabled"
     },
     {
-      "matchPackageNames": ["github-actions"],
-      "matchDatasources": ["github-tags"],
-      "matchFileNames": ["\\.github\\/workflows\\/.*"],
-      "commitMessagePrefix": "ci(no-release): ",
-      "commitMessageAction": "bump",
-      "commitMessageTopic": "{{depName}} from {{currentVersion}} to {{newVersion}}"
+      "description": "The Dockerfile base image is what consumers run (action.yaml builds it at the action ref), so a bump must release a patch (fix).",
+      "matchManagers": ["dockerfile"],
+      "commitMessagePrefix": "fix(deps):",
+      "semanticCommits": "disabled"
     },
     {
-      "matchUpdateTypes": ["patch"],
-      "addLabels": ["patch"]
+      "description": "Step-level actions keep full semver tags: .github/workflows/actions.lock records and enforces the SHAs, so Renovate must not pin digests here (overrides the preset's pinGitHubActionDigests).",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action"],
+      "pinDigests": false
     },
     {
-      "matchUpdateTypes": ["minor"],
-      "addLabels": ["minor"]
-    },
-    {
-      "matchUpdateTypes": ["major"],
-      "addLabels": ["major"]
+      "description": "Reusable workflow calls (jobs.<job_id>.uses) are not covered by the lockfile: keep them pinned to a full commit SHA with a version comment.",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["workflow"],
+      "pinDigests": true
     }
-  ],
-  "gitIgnoredAuthors": ["terraform-consumer[bot]", "bulldozer[bot]"]
+  ]
 }

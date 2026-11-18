@@ -6,31 +6,38 @@ on:
     branches:
       - main
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+# Never run two releases at once; queue instead of cancelling a running one.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
+# Nothing is granted by default; each job asks for what it needs.
+permissions: {}
+
+# The action image is built by the consumer's runner from the Dockerfile at the
+# action ref (see action.yaml). A release therefore only creates tags and a
+# GitHub release; there is no image to build or publish.
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.semantic-release.outputs.tag }}
     permissions:
       contents: write
-      packages: write
-      attestations: write
-      id-token: write
       issues: write
       pull-requests: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: "lts/*"
 
+      # package-lock.json pins the whole release toolchain.
       - name: Install dependencies
-        run: npm install --save-dev semantic-release @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator conventional-changelog-conventionalcommits semantic-release-tags
+        run: npm ci --ignore-scripts
 
       - name: Run Semantic Release
         id: semantic-release
@@ -38,24 +45,70 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npx semantic-release
-          TAGS=$(git tag --points-at HEAD | sed "s|^|${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:|" | xargs | sed 's/ /,/g')
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          # semantic-release tags HEAD only when it publishes. Expose that tag
+          # (empty when nothing was released) for the alias-tags job.
+          tag=""
+          while IFS= read -r t
+          do
+            if [[ "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            then
+              tag="$t"
+            fi
+          done < <(git tag --points-at HEAD)
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
-      - name: Log in to the Container registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+  # semantic-release only creates the exact tag (v2.3.4). Consumers use the
+  # floating tags v2 and v2.3, so move them to each new release. Separate job:
+  # it needs no checkout, no npm toolchain and no issue or PR scopes.
+  alias-tags:
+    name: Move floating alias tags
+    needs: release
+    if: needs.release.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Move vMAJOR and vMAJOR.MINOR
+        env:
+          # Passed through env, never interpolated into the script.
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Accept only a plain release tag. Anything else (pre-releases, odd
+          # characters, path tricks) is rejected before any API call.
+          if [[ ! "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
+          then
+            echo "::error::Refusing to move alias tags for unexpected tag name"
+            exit 1
+          fi
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+          sha="$(gh api "repos/${REPO}/commits/${RELEASE_TAG}" --jq .sha)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]
+          then
+            echo "::error::Could not resolve ${RELEASE_TAG} to a commit"
+            exit 1
+          fi
 
-      - name: Build and push Docker image
-        id: push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.semantic-release.outputs.tags }}
+          move_tag() {
+            local name="$1" err
+            if err="$(gh api "repos/${REPO}/git/ref/tags/${name}" 2>&1 >/dev/null)"
+            then
+              gh api --method PATCH "repos/${REPO}/git/refs/tags/${name}" \
+                -f sha="$sha" -F force=true >/dev/null
+              echo "Moved ${name} to ${sha}"
+            elif [[ "$err" == *"HTTP 404"* ]]
+            then
+              gh api --method POST "repos/${REPO}/git/refs" \
+                -f ref="refs/tags/${name}" -f sha="$sha" >/dev/null
+              echo "Created ${name} at ${sha}"
+            else
+              echo "::error::Could not look up ${name}: ${err}"
+              exit 1
+            fi
+          }
+
+          move_tag "v${major}"
+          move_tag "v${major}.${minor}"
